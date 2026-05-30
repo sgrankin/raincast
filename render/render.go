@@ -17,6 +17,7 @@ import (
 	"github.com/gdamore/tcell/v3"
 
 	"github.com/sgrankin/raincast/model"
+	"github.com/sgrankin/raincast/playout"
 	"github.com/sgrankin/raincast/sim"
 	"github.com/sgrankin/raincast/theme"
 )
@@ -91,19 +92,33 @@ type Renderer struct {
 	cols, rainRows int
 	grid           [][]vcell // [rainRows][cols]
 	rev            string
-	minContrast    float64 // match the terminal's minimum-contrast; <=1 disables
+	minContrast    float64       // match the terminal's minimum-contrast; <=1 disables
+	replayDelay    time.Duration // playout buffer depth; <=0 spawns on arrival
 }
 
-// New builds a Renderer over a tcell screen (not yet initialized). minContrast
-// should match the terminal's minimum-contrast setting (e.g. Ghostty's 1.1): a
-// glyph dimmer than this ratio against the background is left blank instead of
-// drawn, so the terminal never contrast-boosts a fading tail toward white. <=1
-// disables it (trails fade all the way into the background).
-func New(screen tcell.Screen, pal theme.Palette, fps int, minContrast float64) *Renderer {
-	if fps <= 0 {
-		fps = 30
+// Config holds renderer options.
+type Config struct {
+	FPS int
+	// MinContrast should match the terminal's minimum-contrast (e.g. Ghostty's
+	// 1.1): a glyph dimmer than this ratio against the background is left blank
+	// rather than drawn, so the terminal never contrast-boosts a fading tail
+	// toward white. <=1 disables it (trails fade all the way into the background).
+	MinContrast float64
+	// ReplayDelay is the playout buffer depth: events are held and released at
+	// their true relative times delayed by this much, so bursty (batched) exports
+	// still render as smooth real-time rain. <=0 spawns on arrival.
+	ReplayDelay time.Duration
+}
+
+// New builds a Renderer over a tcell screen (not yet initialized).
+func New(screen tcell.Screen, pal theme.Palette, cfg Config) *Renderer {
+	if cfg.FPS <= 0 {
+		cfg.FPS = 30
 	}
-	return &Renderer{screen: screen, pal: pal, fps: fps, rev: buildRev(), minContrast: minContrast}
+	return &Renderer{
+		screen: screen, pal: pal, fps: cfg.FPS, rev: buildRev(),
+		minContrast: cfg.MinContrast, replayDelay: cfg.ReplayDelay,
+	}
 }
 
 // drawable reports whether a glyph at fg should be drawn, or skipped (left blank)
@@ -143,6 +158,7 @@ func (r *Renderer) Run(ctx context.Context, events <-chan model.Event, s *sim.Si
 	s.Resize(r.cols, r.rainRows)
 
 	eq := r.screen.EventQ() // v3 posts input events here; no PollEvent goroutine needed
+	pb := playout.New(r.replayDelay)
 	ticker := time.NewTicker(time.Second / time.Duration(r.fps))
 	defer ticker.Stop()
 	last := time.Now()
@@ -183,10 +199,13 @@ func (r *Renderer) Run(ctx context.Context, events <-chan model.Event, s *sim.Si
 			for {
 				select {
 				case e := <-events:
-					s.Ingest(e)
+					pb.Add(e, now) // buffer arrivals; release at their playout time
 				default:
 					break drain
 				}
+			}
+			for _, e := range pb.Release(now) {
+				s.Ingest(e)
 			}
 			if !paused {
 				s.Advance(dt)

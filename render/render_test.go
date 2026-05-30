@@ -60,7 +60,7 @@ func (f *fakeCells) glyphsInRows(y0, y1 int) int {
 
 func TestPaintRendersRainAndHUD(t *testing.T) {
 	c := newFakeCells(90, 14)
-	r := New(nil, theme.Of(theme.Dark), 30, 0)
+	r := New(nil, theme.Of(theme.Dark), Config{FPS: 30})
 	r.resize(c)
 	s := sim.New(sim.Config{LaneKey: "trace", DictCap: 18, MinFall: 4, MaxFall: 16}, r.cols, r.rainRows)
 
@@ -103,7 +103,7 @@ func TestPaintRendersRainAndHUD(t *testing.T) {
 // behind it (a terminal can't glow, so brightness alone has to carry it).
 func TestHeadBrighterThanTrail(t *testing.T) {
 	c := newFakeCells(20, 22)
-	r := New(nil, theme.Of(theme.Dark), 30, 0)
+	r := New(nil, theme.Of(theme.Dark), Config{FPS: 30})
 	r.resize(c)
 	s := sim.New(sim.Config{LaneKey: "trace", MinFall: 4, MaxFall: 16}, r.cols, r.rainRows)
 	s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, MS: 100, TraceID: "t"})
@@ -129,7 +129,7 @@ func TestHeadBrighterThanTrail(t *testing.T) {
 // it toward white. A bright head clears the floor and is drawn.
 func TestContrastClear(t *testing.T) {
 	pal := theme.Of(theme.Dark)
-	r := New(nil, pal, 30, 1.1)
+	r := New(nil, pal, Config{FPS: 30, MinContrast: 1.1})
 	bright := pal.Bg.Blend(pal.Status[5], 1.0)  // red head
 	dim := pal.Bg.Blend(pal.Status[5], 0.10)    // red tail floor
 	if !r.drawable(bright) {
@@ -138,14 +138,14 @@ func TestContrastClear(t *testing.T) {
 	if r.drawable(dim) {
 		t.Errorf("dim tail should be skipped: contrast=%.3f (want < 1.1)", dim.Contrast(pal.Bg))
 	}
-	if disabled := New(nil, pal, 30, 0); !disabled.drawable(dim) {
+	if disabled := New(nil, pal, Config{FPS: 30}); !disabled.drawable(dim) {
 		t.Error("min-contrast <= 1 must draw everything")
 	}
 }
 
 func TestPaintEmptyFieldStillDrawsHUD(t *testing.T) {
 	c := newFakeCells(40, 8)
-	r := New(nil, theme.Of(theme.Light), 30, 0)
+	r := New(nil, theme.Of(theme.Light), Config{FPS: 30})
 	r.resize(c)
 	s := sim.New(sim.Config{}, r.cols, r.rainRows)
 	r.paint(c, s)

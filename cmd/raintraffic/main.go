@@ -331,6 +331,7 @@ func main() {
 	rps := flag.Float64("rps", 12, "base requests per second (before jitter and storms)")
 	dur := flag.Duration("duration", 0, "run duration; 0 = until interrupted")
 	timeScale := flag.Float64("time-scale", 1, "divide simulated latencies by this to speed up wall-clock")
+	batch := flag.Duration("batch", time.Second, "exporter batch interval (simulates a real app's export batching; OTel's default is 5s)")
 	flag.Parse()
 	if *timeScale <= 0 {
 		*timeScale = 1
@@ -374,15 +375,15 @@ func main() {
 	var flushes, shutdowns []func(context.Context) error
 	for _, s := range services {
 		res := resource.NewSchemaless(attribute.String("service.name", s))
-		// Short flush interval (vs. the 5s default) so spans/logs reach raincast in
-		// a steady trickle — otherwise they arrive in 5s bursts and the rain falls
-		// in synchronized waves instead of a continuous stream.
+		// Batch interval simulates a real app's export batching. raincast's playout
+		// buffer (--replay-delay) reconstructs real timing from span timestamps, so
+		// this no longer needs to be artificially short to avoid wave artifacts.
 		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(traceExp, sdktrace.WithBatchTimeout(200*time.Millisecond)),
+			sdktrace.WithBatcher(traceExp, sdktrace.WithBatchTimeout(*batch)),
 			sdktrace.WithResource(res),
 		)
 		lp := sdklog.NewLoggerProvider(
-			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp, sdklog.WithExportInterval(200*time.Millisecond))),
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp, sdklog.WithExportInterval(*batch))),
 			sdklog.WithResource(res),
 		)
 		g.tracers[s] = tp.Tracer("raintraffic")

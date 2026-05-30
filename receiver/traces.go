@@ -48,6 +48,7 @@ func (t traceSvc) Export(ctx context.Context, req *coltracepb.ExportTraceService
 					MS:       float64(sp.EndTimeUnixNano-sp.StartTimeUnixNano) / 1e6,
 					IP:       a.str("client.address", "net.peer.ip"),
 					Err:      sp.GetStatus().GetCode() == tracepb.Status_STATUS_CODE_ERROR,
+					EndNano:  sp.EndTimeUnixNano,
 				})
 			}
 		}

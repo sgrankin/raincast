@@ -5,8 +5,13 @@
 package model
 
 // Event is one normalized piece of telemetry. The concrete types are SpanEvent
-// and LogEvent; a consumer type-switches on them.
-type Event interface{ isEvent() }
+// and LogEvent; a consumer type-switches on them. When reports the event's own
+// timestamp (unix nanos) so a playout buffer can replay events at their true
+// relative times regardless of when they were batched/exported.
+type Event interface {
+	isEvent()
+	When() uint64
+}
 
 // SpanEvent is a single decoded span. The receiver's field lookups tolerate
 // semconv drift, so these values resolve across SDK/semconv versions.
@@ -24,9 +29,11 @@ type SpanEvent struct {
 	MS       float64 // server-side duration in milliseconds
 	IP       string  // client.address, empty if masked/absent
 	Err      bool    // span status == ERROR
+	EndNano  uint64  // span end time (unix nanos) — when the request completed
 }
 
-func (SpanEvent) isEvent() {}
+func (SpanEvent) isEvent()       {}
+func (e SpanEvent) When() uint64 { return e.EndNano }
 
 // LogEvent is a single decoded log record. TraceID/SpanID are populated when the
 // log was emitted inside an active span, which is how logs correlate to drops.
@@ -34,9 +41,10 @@ type LogEvent struct {
 	Service  string
 	TraceID  string // empty if emitted outside a span
 	SpanID   string
-	Sev      int    // OTLP SeverityNumber, 1..24 (a number, NOT a string)
+	Sev      int // OTLP SeverityNumber, 1..24 (a number, NOT a string)
 	Body     string
 	TimeNano uint64
 }
 
-func (LogEvent) isEvent() {}
+func (LogEvent) isEvent()       {}
+func (e LogEvent) When() uint64 { return e.TimeNano }
