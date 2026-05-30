@@ -32,12 +32,13 @@ func main() {
 	dictCap := flag.Int("dict-cap", 18, "max distinct route sigils before the pool fills")
 	minFall := flag.Float64("min-fall", 4, "slowest fall (cells/s)")
 	maxFall := flag.Float64("max-fall", 16, "fastest fall (cells/s)")
+	minContrast := flag.Float64("min-contrast", 1.1, "match the terminal's minimum-contrast; tail glyphs dimmer than this clear instead of being boosted (<=1 disables)")
 	_ = flag.Bool("children", true, "render child spans as trailing droplets (not yet wired)")
 	diag := flag.Bool("diag", false, "render a color/brightness diagnostic and exit on q")
 	flag.Parse()
 
 	if *diag {
-		if err := runDiag(*themeFlag, *fps); err != nil {
+		if err := runDiag(*themeFlag, *fps, *minContrast); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -57,7 +58,7 @@ func main() {
 		runErr = runPrinter(ctx, events, *themeFlag, *colorFlag)
 	} else {
 		cfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall}
-		runErr = runRain(ctx, events, *themeFlag, *fps, cfg)
+		runErr = runRain(ctx, events, *themeFlag, *fps, *minContrast, cfg)
 	}
 
 	// The consumer has returned (quit or signal); drain in-flight RPCs, then close.
@@ -80,7 +81,7 @@ func main() {
 }
 
 // runDiag renders the color/brightness diagnostic (no receiver needed).
-func runDiag(themeFlag string, fps int) error {
+func runDiag(themeFlag string, fps int, minContrast float64) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	mode := theme.Detect(themeFlag, true)
@@ -88,18 +89,18 @@ func runDiag(themeFlag string, fps int) error {
 	if err != nil {
 		return fmt.Errorf("init terminal: %w", err)
 	}
-	return render.New(scr, theme.Of(mode), fps).Diag(ctx)
+	return render.New(scr, theme.Of(mode), fps, minContrast).Diag(ctx)
 }
 
 // runRain owns the terminal and paints the rain field until the user quits or ctx
 // is cancelled.
-func runRain(ctx context.Context, events <-chan model.Event, themeFlag string, fps int, cfg sim.Config) error {
+func runRain(ctx context.Context, events <-chan model.Event, themeFlag string, fps int, minContrast float64, cfg sim.Config) error {
 	mode := theme.Detect(themeFlag, true) // query the terminal before tcell takes over
 	scr, err := tcell.NewScreen()
 	if err != nil {
 		return fmt.Errorf("init terminal: %w (try --print for line output)", err)
 	}
-	r := render.New(scr, theme.Of(mode), fps)
+	r := render.New(scr, theme.Of(mode), fps, minContrast)
 	s := sim.New(cfg, 0, 0)
 	return r.Run(ctx, events, s)
 }

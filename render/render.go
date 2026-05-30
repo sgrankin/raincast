@@ -91,14 +91,26 @@ type Renderer struct {
 	cols, rainRows int
 	grid           [][]vcell // [rainRows][cols]
 	rev            string
+	minContrast    float64 // match the terminal's minimum-contrast; <=1 disables
 }
 
-// New builds a Renderer over a tcell screen (not yet initialized).
-func New(screen tcell.Screen, pal theme.Palette, fps int) *Renderer {
+// New builds a Renderer over a tcell screen (not yet initialized). minContrast
+// should match the terminal's minimum-contrast setting (e.g. Ghostty's 1.1): a
+// glyph dimmer than this ratio against the background is left blank instead of
+// drawn, so the terminal never contrast-boosts a fading tail toward white. <=1
+// disables it (trails fade all the way into the background).
+func New(screen tcell.Screen, pal theme.Palette, fps int, minContrast float64) *Renderer {
 	if fps <= 0 {
 		fps = 30
 	}
-	return &Renderer{screen: screen, pal: pal, fps: fps, rev: buildRev()}
+	return &Renderer{screen: screen, pal: pal, fps: fps, rev: buildRev(), minContrast: minContrast}
+}
+
+// drawable reports whether a glyph at fg should be drawn, or skipped (left blank)
+// because the terminal would contrast-boost it. Skipping keeps a cell as a space,
+// which terminals exempt from minimum-contrast.
+func (r *Renderer) drawable(fg theme.RGB) bool {
+	return r.minContrast <= 1 || fg.Contrast(r.pal.Bg) >= r.minContrast
 }
 
 func toColor(c theme.RGB) tcell.Color { return tcell.NewRGBColor(int32(c.R), int32(c.G), int32(c.B)) }
@@ -240,6 +252,9 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 				continue
 			}
 			fg := r.pal.Bg.Blend(cell.col, cell.b)
+			if !r.drawable(fg) {
+				continue // too dim — leave blank so the terminal can't boost it
+			}
 			st := tcell.StyleDefault.Background(toColor(r.pal.Bg)).Foreground(toColor(fg))
 			c.SetContent(x, y+1, cell.ch, nil, st)
 		}
@@ -287,23 +302,29 @@ func (r *Renderer) Diag(ctx context.Context) error {
 		dim := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Dim))
 		r.text(r.screen, 0, 0, fmt.Sprintf(" RAINCAST DIAG · TERM=%s COLORTERM=%s · build %s · q quits",
 			os.Getenv("TERM"), os.Getenv("COLORTERM"), r.rev), base)
-		r.text(r.screen, 0, 1, " one drop's trail: bright (left) → dim (right). 'block' vs 'text' should match.", dim)
-		r.text(r.screen, 0, 2, " if 'text' brightens at the dim (right) end but 'block' doesn't → terminal minimum-contrast.", dim)
+		r.text(r.screen, 0, 1, fmt.Sprintf(" one drop's trail: bright (left) → dim (right). --min-contrast=%.2g", r.minContrast), dim)
+		r.text(r.screen, 0, 2, " block: reference · text: raw (boosts at dim end) · fix: clears below the contrast floor", dim)
 
 		labels := map[int]string{2: "2xx", 3: "3xx", 4: "4xx", 5: "5xx"}
 		const sw = 40
 		for ci, cl := range []int{2, 3, 4, 5} {
 			col := r.pal.Status[cl]
-			row := 4 + ci*3
+			row := 4 + ci*4
 			r.text(r.screen, 0, row, labels[cl]+" block", base)
 			r.text(r.screen, 0, row+1, "    text ", dim)
+			r.text(r.screen, 0, row+2, "    fix  ", dim)
 			for i := 0; i < sw; i++ {
 				b := 1.0 - float64(i)/float64(sw-1) // 1.0 → 0.0
-				st := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Bg.Blend(col, b)))
-				// Same color via the exact rain path, drawn two ways: a block char
-				// (contrast-boost-exempt in most terminals) and a text glyph (boosted).
+				fg := r.pal.Bg.Blend(col, b)
+				st := tcell.StyleDefault.Background(bg).Foreground(toColor(fg))
+				// Identical color via the exact rain path, drawn three ways: a block
+				// char (contrast-boost-exempt), a raw text glyph (boosted at the dim
+				// end), and the fix (text, but skipped once below the contrast floor).
 				r.screen.SetContent(11+i, row, '█', nil, st)
 				r.screen.SetContent(11+i, row+1, 'ｷ', nil, st)
+				if r.drawable(fg) {
+					r.screen.SetContent(11+i, row+2, 'ｷ', nil, st)
+				}
 			}
 		}
 		r.screen.Show()

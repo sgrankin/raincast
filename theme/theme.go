@@ -6,6 +6,7 @@ package theme
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 )
@@ -41,6 +42,28 @@ func (c RGB) Blend(o RGB, t float64) RGB {
 	}
 	lerp := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*t) }
 	return RGB{lerp(c.R, o.R), lerp(c.G, o.G), lerp(c.B, o.B)}
+}
+
+// Luminance is WCAG relative luminance. It matches Ghostty's computation exactly,
+// so Contrast below lines up with a terminal's minimum-contrast boundary.
+func (c RGB) Luminance() float64 {
+	lin := func(v uint8) float64 {
+		s := float64(v) / 255
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+}
+
+// Contrast is the WCAG contrast ratio (1..21) between two colors.
+func (c RGB) Contrast(o RGB) float64 {
+	l1, l2 := c.Luminance(), o.Luminance()
+	if l1 < l2 {
+		l1, l2 = l2, l1
+	}
+	return (l1 + 0.05) / (l2 + 0.05)
 }
 
 const reset = "\x1b[0m"
