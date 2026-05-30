@@ -1,0 +1,94 @@
+package sim
+
+import (
+	"testing"
+
+	"github.com/sgrankin/raincast/model"
+)
+
+func newTestSim() *Sim {
+	return New(Config{LaneKey: "trace", DictCap: 18, MinFall: 4, MaxFall: 16}, 80, 24)
+}
+
+func TestSpawnAndAdvance(t *testing.T) {
+	s := newTestSim()
+	s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, Bytes: 100, MS: 40, TraceID: "abc"})
+	if len(s.Drops()) != 1 {
+		t.Fatalf("want 1 drop, got %d", len(s.Drops()))
+	}
+	d := s.Drops()[0]
+	if d.Head != '↓' {
+		t.Errorf("GET head = %q, want ↓", d.Head)
+	}
+	if d.Class != 2 {
+		t.Errorf("class = %d, want 2", d.Class)
+	}
+	y0 := d.Y
+	s.Advance(1.0) // one second
+	if d.Y <= y0 {
+		t.Errorf("drop did not fall: y %v -> %v", y0, d.Y)
+	}
+	// Vy should sit in the configured range.
+	if d.Vy < 4 || d.Vy > 16 {
+		t.Errorf("Vy = %v, want in [4,16]", d.Vy)
+	}
+}
+
+func TestFallSpeedMonotonicInLatency(t *testing.T) {
+	s := newTestSim()
+	fast := s.fall(1)     // low latency -> brisk
+	slow := s.fall(10000) // high latency -> crawl
+	if !(fast > slow) {
+		t.Errorf("expected fast(%v) > slow(%v)", fast, slow)
+	}
+}
+
+func TestEviction(t *testing.T) {
+	s := New(Config{}, 80, 10)
+	s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, MS: 1, TraceID: "t"})
+	// Run long enough to fall well past the bottom.
+	for i := 0; i < 200; i++ {
+		s.Advance(0.1)
+	}
+	if len(s.Drops()) != 0 {
+		t.Errorf("drop not evicted: %d remain", len(s.Drops()))
+	}
+	if _, ok := s.index["t"]; ok {
+		t.Error("trace index not cleaned up after eviction")
+	}
+}
+
+func TestDictionaryAssignsSigilAfterThreeHits(t *testing.T) {
+	s := newTestSim()
+	ev := model.SpanEvent{Method: "GET", Route: "/hot", Status: 200, TraceID: "t"}
+	for i := 0; i < 2; i++ {
+		s.Ingest(ev)
+	}
+	if s.DictSize() != 0 {
+		t.Fatalf("sigil assigned too early: dict=%d", s.DictSize())
+	}
+	s.Ingest(ev) // third hit
+	if s.DictSize() != 1 {
+		t.Fatalf("sigil not assigned after 3 hits: dict=%d", s.DictSize())
+	}
+	// The route collapses to its learned sigil as the body's leading glyph
+	// (the rest of the body is the byte-size tail, padded with noise).
+	d := s.Drops()[len(s.Drops())-1]
+	if d.Body[0] != '⊕' {
+		t.Errorf("expected leading sigil ⊕, got %q in %q", d.Body[0], string(d.Body))
+	}
+}
+
+func TestForecastReactsTo5xx(t *testing.T) {
+	s := newTestSim()
+	for i := 0; i < 20; i++ {
+		s.Ingest(model.SpanEvent{Method: "POST", Route: "/c", Status: 500, Err: true, TraceID: "t"})
+	}
+	f := s.Weather()
+	if f.Counts[5] == 0 {
+		t.Fatal("no 5xx counted")
+	}
+	if f.Text != "RED SQUALL · server bleeding" {
+		t.Errorf("forecast = %q, want red squall", f.Text)
+	}
+}

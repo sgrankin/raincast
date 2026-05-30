@@ -30,6 +30,19 @@ type RGB struct{ R, G, B uint8 }
 
 func (c RGB) ansiFG() string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.R, c.G, c.B) }
 
+// Blend interpolates from c toward o by t in [0,1] (t=0 → c, t=1 → o). The rain
+// field uses bg.Blend(hue, brightness) so a fading trail dissolves into the
+// background as its brightness decays.
+func (c RGB) Blend(o RGB, t float64) RGB {
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	lerp := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*t) }
+	return RGB{lerp(c.R, o.R), lerp(c.G, o.G), lerp(c.B, o.B)}
+}
+
 const reset = "\x1b[0m"
 
 // Palette is the full color table for one mode. Status hues are keyed by the
@@ -42,6 +55,7 @@ type Palette struct {
 	SevErr  RGB    // >=17 error/fatal
 	Dim     RGB    // labels, secondary text
 	Fg      RGB    // primary text
+	Bg      RGB    // field background; trails fade toward this
 }
 
 // dark carries the browser prototype's neon-on-black hues verbatim.
@@ -52,6 +66,7 @@ var dark = Palette{
 	SevErr:  RGB{0xff, 0x2b, 0x4e},
 	Dim:     RGB{0x5f, 0x8f, 0x75},
 	Fg:      RGB{0x7d, 0xff, 0xb0},
+	Bg:      RGB{0x02, 0x06, 0x0a},
 }
 
 // light uses saturated, darker hues that stay legible on a light background —
@@ -63,6 +78,7 @@ var light = Palette{
 	SevErr:  RGB{0xc2, 0x00, 0x18},
 	Dim:     RGB{0x8a, 0x8a, 0x8a},
 	Fg:      RGB{0x1a, 0x2a, 0x20},
+	Bg:      RGB{0xf5, 0xf5, 0xf2},
 }
 
 // Of returns the palette for a mode.
