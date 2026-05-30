@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package receiver implements an OTLP/gRPC receiver. It decodes inbound traces
 // and logs into normalized model.Events and forwards them on a channel. The
 // Export RPCs must return fast — a slow receiver backpressures the instrumented

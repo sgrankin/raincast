@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package model holds the normalized, render-agnostic telemetry events that the
 // receiver produces and a renderer consumes. Keeping these free of any OTLP or
 // rendering dependency is what lets the same events feed a stdout printer today

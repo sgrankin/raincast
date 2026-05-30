@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package render paints the rain field with tcell and drives the game loop.
 //
 // The signature rain look comes from a per-cell brightness buffer: each frame

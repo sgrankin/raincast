@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Command raincast renders OTLP telemetry as terminal rain. It listens for
 // OTLP/gRPC, decodes spans and log records into normalized events, and paints
 // them as a falling field (or, with --print, as a themed line stream).

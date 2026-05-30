@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package sim
 
 import (
@@ -182,7 +184,7 @@ func TestFloodCap(t *testing.T) {
 }
 
 func TestLogSevFilter(t *testing.T) {
-	s := New(Config{MinLogSev: 13}, 80, 24) // WARN+ only
+	s := New(Config{MinLogSev: 13}, 80, 24)         // WARN+ only
 	s.Ingest(model.LogEvent{TraceID: "t", Sev: 9})  // INFO — filtered out
 	s.Ingest(model.LogEvent{TraceID: "t", Sev: 17}) // ERROR — sparks
 	sparks := 0

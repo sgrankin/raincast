@@ -84,3 +84,7 @@ real app), `--n-plus-one` (an N+1 query burst on `/api/dashboard`), `--time-scal
 - `theme/` — dark/light palettes, OSC 11 detection, WCAG contrast
 - `console/` — `--print` line renderer
 - `cmd/raintraffic/` — synthetic multi-service OTLP generator
+
+## License
+
+MIT — see [LICENSE](LICENSE).

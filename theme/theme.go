@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package theme defines the color language shared by every raincast renderer.
 // The same palettes drive the milestone-1 stdout printer and, later, the tcell
 // rain field — so the terminal output stays visually consistent across modes and

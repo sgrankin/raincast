@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package console renders normalized events as colorized, glyph-annotated lines.
 // It is the milestone-1 stand-in for the tcell rain field: the same encoding
 // (method → head glyph, status → hue, route → learned sigil, severity → spark
@@ -29,7 +31,7 @@ type Printer struct {
 	w    io.Writer
 	pen  theme.Pen
 	dict map[string]string // route -> assigned sigil
-	hits map[string]int     // route -> hit count
+	hits map[string]int    // route -> hit count
 }
 
 func NewPrinter(w io.Writer, pen theme.Pen) *Printer {

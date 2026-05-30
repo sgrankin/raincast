@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Command raintraffic is a synthetic OTLP traffic generator for exercising
 // raincast. It models a small distributed system — a gateway fronting several
 // backend services — and emits real OTLP traces and logs via the OTel SDK, so it

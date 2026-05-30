@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package sim is the render-agnostic simulation behind the rain field. It turns
 // normalized telemetry events into falling drops and advances their physics. It
 // deliberately has no tcell or color dependency — a renderer reads Drops() and
@@ -110,7 +112,7 @@ func New(cfg Config, cols, rows int) *Sim {
 		cfg.MinFall, cfg.MaxFall = cfg.MaxFall, cfg.MinFall
 	}
 	s := &Sim{
-		cfg: cfg,
+		cfg:  cfg,
 		dict: map[string]rune{}, hits: map[string]int{}, lru: map[string]uint64{},
 		index:   map[string]*Drop{},
 		weather: newWeather(),
@@ -218,8 +220,8 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 // HTTP method to glyph. sparkGlyph leads a log spark.
 const (
 	childHead  = '·'
-	sparkGlyph = '·'   // a light spark; requests are the focus, logs are an accent
-	sparkAlpha = 0.55  // dimmer than a request head — logs are secondary
+	sparkGlyph = '·'  // a light spark; requests are the focus, logs are an accent
+	sparkAlpha = 0.55 // dimmer than a request head — logs are secondary
 
 	// maxHitsTracked bounds the pre-assignment hit-counter map (see sigilFor).
 	maxHitsTracked = 512
@@ -247,7 +249,7 @@ func (s *Sim) spawnLog(e model.LogEvent) {
 		Y:       -rand.Float64() * spawnStaggerRows,
 		Vy:      s.fall(0), // sparks fall fast (no duration)
 		Head:    sparkGlyph,
-		Body:    nil,        // a single cell; the decay wake gives a short fade
+		Body:    nil, // a single cell; the decay wake gives a short fade
 		Sev:     sev,
 		Alpha:   sparkAlpha, // dimmer than a request head
 		TraceID: e.TraceID,

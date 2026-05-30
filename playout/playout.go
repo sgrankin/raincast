@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package playout is a jitter/playout buffer for telemetry events. Instrumented
 // apps export spans in batches, so events arrive in bursts that don't reflect
 // the real request timing. The buffer accepts events as they arrive and releases

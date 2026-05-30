@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package render
 
 import (
@@ -130,8 +132,8 @@ func TestHeadBrighterThanTrail(t *testing.T) {
 func TestContrastClear(t *testing.T) {
 	pal := theme.Of(theme.Dark)
 	r := New(nil, pal, Config{FPS: 30, MinContrast: 1.1})
-	bright := pal.Bg.Blend(pal.Status[5], 1.0)  // red head
-	dim := pal.Bg.Blend(pal.Status[5], 0.10)    // red tail floor
+	bright := pal.Bg.Blend(pal.Status[5], 1.0) // red head
+	dim := pal.Bg.Blend(pal.Status[5], 0.10)   // red tail floor
 	if !r.drawable(bright) {
 		t.Errorf("bright head should draw: contrast=%.3f", bright.Contrast(pal.Bg))
 	}
