@@ -56,6 +56,7 @@ type Drop struct {
 	Err   bool
 	Evap  bool // 404s evaporate partway down
 	Child bool // a trailing child droplet (downstream span), not a request
+	Sev   int  // >0 marks a log spark, colored by OTLP SeverityNumber
 
 	TraceID string
 	Kind    int32
@@ -130,7 +131,7 @@ func (s *Sim) Ingest(ev model.Event) {
 			s.spawnChild(e)
 		}
 	case model.LogEvent:
-		// log sparks: later milestone
+		s.spawnLog(e)
 	}
 }
 
@@ -190,8 +191,36 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 }
 
 // childHead leads a child droplet — a small dot, since downstream spans have no
-// HTTP method to glyph.
-const childHead = '·'
+// HTTP method to glyph. sparkGlyph leads a log spark.
+const (
+	childHead  = '·'
+	sparkGlyph = '✦'
+)
+
+// spawnLog adds a log spark: a single severity-colored glyph that falls in its
+// trace's lane (so it sparks down the same column as its request), or a random
+// lane when the log has no trace (an orphan log scattered into the field).
+// Replay time-orders logs with their spans, so no separate late-arrival buffer
+// is needed. Logs don't count toward the weather.
+func (s *Sim) spawnLog(e model.LogEvent) {
+	if s.cols <= 0 {
+		return
+	}
+	sev := e.Sev
+	if sev <= 0 {
+		sev = 9 // default to INFO so Sev>0 reliably marks a spark
+	}
+	s.drops = append(s.drops, &Drop{
+		Lane:    s.lane(e.TraceID, ""), // trace's column, or random if orphan
+		Y:       -rand.Float64() * spawnStaggerRows,
+		Vy:      s.fall(0), // sparks fall fast (no duration)
+		Head:    sparkGlyph,
+		Body:    nil, // a single bright cell
+		Sev:     sev,
+		Alpha:   1,
+		TraceID: e.TraceID,
+	})
+}
 
 // spawnChild adds a trailing droplet for a downstream span. It shares the
 // parent's lane (both hash the same trace_id), so a request and its children

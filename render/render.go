@@ -237,10 +237,13 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 		if d.Lane < 0 || d.Lane >= r.cols {
 			continue
 		}
-		// Children are muted (secondary to their request) unless they errored;
-		// requests take their status hue.
+		// Log sparks take severity color (overriding status — surfaces "200 OK but
+		// logged ERROR"); children are muted unless they errored; requests take
+		// their status hue.
 		var col theme.RGB
 		switch {
+		case d.Sev > 0:
+			col = r.pal.Severity(d.Sev)
 		case d.Child && d.Err:
 			col = r.pal.Status[5]
 		case d.Child:

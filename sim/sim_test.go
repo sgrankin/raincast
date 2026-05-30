@@ -107,6 +107,30 @@ func TestChildrenDisabled(t *testing.T) {
 	}
 }
 
+func TestLogSparkInTraceLane(t *testing.T) {
+	s := New(Config{LaneKey: "trace", MinFall: 4, MaxFall: 16}, 80, 24)
+	s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, TraceID: "t1"})
+	s.Ingest(model.LogEvent{TraceID: "t1", Sev: 17, Body: "boom"}) // ERROR in the same trace
+	ds := s.Drops()
+	if len(ds) != 2 {
+		t.Fatalf("want request + spark = 2, got %d", len(ds))
+	}
+	spark := ds[1]
+	if spark.Sev != 17 {
+		t.Errorf("spark Sev = %d, want 17", spark.Sev)
+	}
+	if spark.Head != sparkGlyph {
+		t.Errorf("spark head = %q, want %q", spark.Head, sparkGlyph)
+	}
+	if spark.Lane != ds[0].Lane {
+		t.Errorf("spark lane %d should match its trace's request lane %d", spark.Lane, ds[0].Lane)
+	}
+	// Logs don't drive the weather.
+	if c := s.Weather().Counts; c[2] != 1 {
+		t.Errorf("weather should count the request only: %v", c)
+	}
+}
+
 func TestForecastReactsTo5xx(t *testing.T) {
 	s := newTestSim()
 	for i := 0; i < 20; i++ {
