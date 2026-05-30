@@ -10,6 +10,7 @@ package render
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
@@ -18,6 +19,34 @@ import (
 	"github.com/sgrankin/raincast/sim"
 	"github.com/sgrankin/raincast/theme"
 )
+
+// buildRev returns the VCS revision Go embeds at build time, shown in the HUD so
+// the running binary is unambiguous when iterating on visuals.
+func buildRev() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	rev, dirty := "", false
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 8 {
+		rev = rev[:8]
+	}
+	if dirty {
+		rev += "+"
+	}
+	return rev
+}
 
 const (
 	decayPerFrame = 0.80 // trail brightness multiplier per frame
@@ -60,6 +89,7 @@ type Renderer struct {
 
 	cols, rainRows int
 	grid           [][]vcell // [rainRows][cols]
+	rev            string
 }
 
 // New builds a Renderer over a tcell screen (not yet initialized).
@@ -67,7 +97,7 @@ func New(screen tcell.Screen, pal theme.Palette, fps int) *Renderer {
 	if fps <= 0 {
 		fps = 30
 	}
-	return &Renderer{screen: screen, pal: pal, fps: fps}
+	return &Renderer{screen: screen, pal: pal, fps: fps, rev: buildRev()}
 }
 
 func toColor(c theme.RGB) tcell.Color { return tcell.NewRGBColor(int32(c.R), int32(c.G), int32(c.B)) }
@@ -232,7 +262,7 @@ func (r *Renderer) drawHUD(c cells, s *sim.Sim) {
 	}
 	r.text(c, x, 0, fmt.Sprintf("%d/s", fc.RPS), dim)
 
-	bottom := fmt.Sprintf(" sigils: %d   q quit · space pause", s.DictSize())
+	bottom := fmt.Sprintf(" sigils: %d   q quit · space pause   build %s", s.DictSize(), r.rev)
 	r.text(c, 0, h-1, bottom, dim)
 }
 
