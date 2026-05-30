@@ -78,6 +78,7 @@ type Config struct {
 	MinFall, MaxFall float64 // cells/sec; slowest, fastest
 	Children         bool    // spawn child droplets for downstream (non-HTTP) spans
 	MaxDrops         int     // cap on live drops (flood protection); 0 = auto from field size
+	MinLogSev        int     // minimum OTLP severity to spark a log (e.g. 13 = WARN); 0 = all
 }
 
 // Sim owns all mutable rain state.
@@ -217,33 +218,38 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 // HTTP method to glyph. sparkGlyph leads a log spark.
 const (
 	childHead  = '·'
-	sparkGlyph = '✦'
+	sparkGlyph = '·'   // a light spark; requests are the focus, logs are an accent
+	sparkAlpha = 0.55  // dimmer than a request head — logs are secondary
 
 	// maxHitsTracked bounds the pre-assignment hit-counter map (see sigilFor).
 	maxHitsTracked = 512
 )
 
-// spawnLog adds a log spark: a single severity-colored glyph that falls in its
-// trace's lane (so it sparks down the same column as its request), or a random
-// lane when the log has no trace (an orphan log scattered into the field).
-// Replay time-orders logs with their spans, so no separate late-arrival buffer
-// is needed. Logs don't count toward the weather.
+// spawnLog adds a log spark: a single dim, severity-colored dot that falls (and
+// fades, via the decay wake) in its trace's lane — or a random lane for an
+// orphan log. Logs below MinLogSev are skipped: requests are the focus, so by
+// default only WARN+ sparks, signalling "something happened here" rather than
+// echoing every INFO line. Replay time-orders logs with their spans, so no
+// separate late-arrival buffer is needed. Logs don't count toward the weather.
 func (s *Sim) spawnLog(e model.LogEvent) {
 	if s.cols <= 0 {
 		return
 	}
 	sev := e.Sev
 	if sev <= 0 {
-		sev = 9 // default to INFO so Sev>0 reliably marks a spark
+		sev = 9 // treat missing severity as INFO
+	}
+	if sev < s.cfg.MinLogSev {
+		return
 	}
 	s.drops = append(s.drops, &Drop{
 		Lane:    s.lane(e.TraceID, ""), // trace's column, or random if orphan
 		Y:       -rand.Float64() * spawnStaggerRows,
 		Vy:      s.fall(0), // sparks fall fast (no duration)
 		Head:    sparkGlyph,
-		Body:    nil, // a single bright cell
+		Body:    nil,        // a single cell; the decay wake gives a short fade
 		Sev:     sev,
-		Alpha:   1,
+		Alpha:   sparkAlpha, // dimmer than a request head
 		TraceID: e.TraceID,
 	})
 }

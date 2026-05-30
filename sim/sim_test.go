@@ -181,6 +181,21 @@ func TestFloodCap(t *testing.T) {
 	}
 }
 
+func TestLogSevFilter(t *testing.T) {
+	s := New(Config{MinLogSev: 13}, 80, 24) // WARN+ only
+	s.Ingest(model.LogEvent{TraceID: "t", Sev: 9})  // INFO — filtered out
+	s.Ingest(model.LogEvent{TraceID: "t", Sev: 17}) // ERROR — sparks
+	sparks := 0
+	for _, d := range s.Drops() {
+		if d.Sev > 0 {
+			sparks++
+		}
+	}
+	if sparks != 1 {
+		t.Errorf("MinLogSev=WARN: %d sparks, want 1 (ERROR only)", sparks)
+	}
+}
+
 func TestForecastReactsTo5xx(t *testing.T) {
 	s := newTestSim()
 	for i := 0; i < 20; i++ {

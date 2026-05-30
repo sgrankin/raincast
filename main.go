@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ func main() {
 	logPanel := flag.Int("log-panel", 0, "reserve this many bottom rows for a scrolling panel tailing decoded events (logs + spans) as text; 0 disables")
 	children := flag.Bool("children", true, "render child (downstream) spans as trailing droplets in the trace's lane")
 	maxDrops := flag.Int("max-drops", 0, "cap on live drops (flood protection); 0 = auto from field size")
+	logLevel := flag.String("log-level", "warn", "minimum log severity to spark: off|trace|debug|info|warn|error|fatal")
 	diag := flag.Bool("diag", false, "render a color/brightness diagnostic and exit on q")
 	flag.Parse()
 
@@ -61,7 +63,7 @@ func main() {
 	if *printMode {
 		runErr = runPrinter(ctx, events, *themeFlag, *colorFlag)
 	} else {
-		simCfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall, Children: *children, MaxDrops: *maxDrops}
+		simCfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall, Children: *children, MaxDrops: *maxDrops, MinLogSev: logSevThreshold(*logLevel)}
 		rndCfg := render.Config{FPS: *fps, MinContrast: *minContrast, ReplayDelay: *replayDelay, LogPanel: *logPanel}
 		runErr = runRain(ctx, events, *themeFlag, rndCfg, simCfg)
 	}
@@ -123,6 +125,27 @@ func runPrinter(ctx context.Context, events <-chan model.Event, themeFlag, color
 		case ev := <-events:
 			printer.Print(ev)
 		}
+	}
+}
+
+// logSevThreshold maps a log-level name to the minimum OTLP SeverityNumber that
+// sparks. "off" suppresses log sparks entirely.
+func logSevThreshold(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "off", "none":
+		return 1000
+	case "trace":
+		return 1
+	case "debug":
+		return 5
+	case "info":
+		return 9
+	case "error":
+		return 17
+	case "fatal":
+		return 21
+	default: // warn
+		return 13
 	}
 }
 
