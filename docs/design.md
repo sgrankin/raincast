@@ -2,7 +2,7 @@
 
 A console program that listens for **OTLP/gRPC** telemetry (traces, logs, metrics)
 from your app and renders it as Matrix-style rain. Each inbound request is a
-falling drop; its child spans trail behind it; its log lines spark off it in
+falling drop; its child spans fall in its lane; its log lines spark off it in
 severity colors; metrics drive the weather readout. No log parsing — the data
 arrives typed and structured.
 
@@ -35,7 +35,7 @@ versions stay consistent. (It predates the rename; its title still reads
 - ✅ **Rain display** — the tcell game loop: request drops (method→glyph,
   status→hue, route→learned sigil, latency→fall, bytes→tail), brightness-buffer
   trails, weather HUD, pause/resize/themes, contrast-aware tail clearing.
-- ✅ **Child droplets** — downstream spans trail their request in-lane (the trace
+- ✅ **Child droplets** — downstream spans fall in their request's lane (the trace
   waterfall); `--children`.
 - ✅ **Log sparks** — logs spark down their trace's lane in severity color
   (overrides status); orphans scatter into the field.
@@ -171,11 +171,22 @@ rebuilt from cell primitives:
 Severity is numeric (`SeverityNumber` 1–24), **not** a string: ≤12 dim, 13–16
 amber, ≥17 red.
 
-### Child spans as trailing droplets
-SERVER spans are request drops. CLIENT/INTERNAL spans with a parent in an
-in-flight trace are child droplets trailing the parent (the trace waterfall).
-They frequently lack http.* attrs — use `span.Name` (`SELECT orders`,
-`→ cache`) as the body text. Gate behind `--children` (default on).
+### Child spans as droplets (the trace waterfall)
+SERVER spans (with http.* attrs) are request drops. Other parented spans are
+child droplets that fall in the **same lane** as their request — both hash the
+trace id, so no parent lookup is needed. They frequently lack http.* attrs — use
+`span.Name` (`SELECT orders`, `→ cache`) as the body text. Gate behind
+`--children` (default on).
+
+**Completion-stream, not parent-envelope.** Replay keys on span *end* time (a
+span isn't exported until it ends), and children end before their root, so within
+a trace the spans fall in *completion order*: children first, the request last
+(appearing above them). This is a faithful "the trace unfolds" view, but it's the
+inverse of the spec's "a slow request drags its children down" — the request
+trails its children rather than leading them. The alternative, if the leading-
+request metaphor is wanted, is to buffer a trace's children until its root
+releases and spawn the cluster together (request at the leading edge); deferred
+for now.
 
 ---
 
@@ -258,8 +269,8 @@ ambiguity, so metrics are deferred until span-count rps proves insufficient.
 3. ✅ **Logs as sparks** — severity-colored glyph in the trace's lane (overrides
    status); orphans scatter into the field. (Replay time-orders logs with their
    spans, so the spec's separate late-arrival buffer wasn't needed.)
-4. ✅ **Child spans as trailing droplets** — the trace waterfall; lane shared via
-   trace-id hash (no index lookup).
+4. ✅ **Child spans as droplets** — the trace waterfall; lane shared via trace-id
+   hash (no index lookup). Completion-order, not parent-leading (see Rendering).
 5. ✅ **Polish** — flood cap, LRU dictionary eviction, 256-color via tcell
    downsampling, pause + graceful shutdown.
 6. ✅ **Replay** — playout buffer; reconstructs real timing from span timestamps.
@@ -281,7 +292,7 @@ ambiguity, so metrics are deferred until span-count rps proves insufficient.
 --print                         line printer instead of the rain field
 --fps           30              render frames per second
 --lane-key      trace|client    lane assignment (default trace)
---children      true            render child (downstream) spans as trailing droplets
+--children      true            render child (downstream) spans as droplets in the trace's lane
 --dict-cap      18              max distinct route sigils (LRU-evicted when full)
 --min-fall      4               slowest fall (cells/s)
 --max-fall      16              fastest fall (cells/s)
@@ -332,7 +343,7 @@ raincast/
   cmd/raintraffic/      synthetic OTLP traffic generator
 ```
 
-The end state: a request falls, its DB/cache/downstream child droplets trail it
-in-lane, its log lines spark off it in severity colors, and if it 500s the whole
+The end state: a request falls, its DB/cache/downstream child droplets fall in
+its lane, its log lines spark off it in severity colors, and if it 500s the whole
 column goes red at once — span status, error logs, and recorded exception all
 corroborating each other as it hits the floor.
