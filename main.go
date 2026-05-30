@@ -33,7 +33,16 @@ func main() {
 	minFall := flag.Float64("min-fall", 4, "slowest fall (cells/s)")
 	maxFall := flag.Float64("max-fall", 16, "fastest fall (cells/s)")
 	_ = flag.Bool("children", true, "render child spans as trailing droplets (not yet wired)")
+	diag := flag.Bool("diag", false, "render a color/brightness diagnostic and exit on q")
 	flag.Parse()
+
+	if *diag {
+		if err := runDiag(*themeFlag, *fps); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	events := make(chan model.Event, *bufSize)
 	srv := receiver.New(events)
@@ -68,6 +77,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, runErr)
 		os.Exit(1)
 	}
+}
+
+// runDiag renders the color/brightness diagnostic (no receiver needed).
+func runDiag(themeFlag string, fps int) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	mode := theme.Detect(themeFlag, true)
+	scr, err := tcell.NewScreen()
+	if err != nil {
+		return fmt.Errorf("init terminal: %w", err)
+	}
+	return render.New(scr, theme.Of(mode), fps).Diag(ctx)
 }
 
 // runRain owns the terminal and paints the rain field until the user quits or ctx

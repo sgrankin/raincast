@@ -10,6 +10,7 @@ package render
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime/debug"
 	"time"
 
@@ -264,6 +265,66 @@ func (r *Renderer) drawHUD(c cells, s *sim.Sim) {
 
 	bottom := fmt.Sprintf(" sigils: %d   q quit · space pause   build %s", s.DictSize(), r.rev)
 	r.text(c, 0, h-1, bottom, dim)
+}
+
+// Diag renders a static color/brightness diagnostic and blocks until the user
+// quits. For each status class it draws two strips representing one drop's trail
+// from head (bright, left) to tail (dim, right): "blend" is the current color
+// math (fade toward background), "scale" is an alternative (scale the hue by
+// brightness). Comparing them in the real terminal reveals whether a dim hue
+// renders as expected or washes to white, and which model avoids it.
+func (r *Renderer) Diag(ctx context.Context) error {
+	if err := r.screen.Init(); err != nil {
+		return err
+	}
+	defer r.screen.Fini()
+	bg := toColor(r.pal.Bg)
+	r.screen.SetStyle(tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Fg)))
+
+	draw := func() {
+		r.screen.Clear()
+		base := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Fg))
+		dim := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Dim))
+		r.text(r.screen, 0, 0, fmt.Sprintf(" RAINCAST DIAG · TERM=%s COLORTERM=%s · build %s · q quits",
+			os.Getenv("TERM"), os.Getenv("COLORTERM"), r.rev), base)
+		r.text(r.screen, 0, 1, " each strip is one drop's trail: head (bright) left → tail (dim) right", dim)
+
+		labels := map[int]string{2: "2xx", 3: "3xx", 4: "4xx", 5: "5xx"}
+		const sw = 40
+		for ci, cl := range []int{2, 3, 4, 5} {
+			col := r.pal.Status[cl]
+			row := 3 + ci*3
+			r.text(r.screen, 0, row, labels[cl]+" blend", base)
+			r.text(r.screen, 0, row+1, "    scale", dim)
+			for i := 0; i < sw; i++ {
+				b := 1.0 - float64(i)/float64(sw-1) // 1.0 → 0.0
+				blend := r.pal.Bg.Blend(col, b)
+				scale := theme.RGB{R: uint8(float64(col.R) * b), G: uint8(float64(col.G) * b), B: uint8(float64(col.B) * b)}
+				r.screen.SetContent(11+i, row, '█', nil, tcell.StyleDefault.Background(bg).Foreground(toColor(blend)))
+				r.screen.SetContent(11+i, row+1, '█', nil, tcell.StyleDefault.Background(bg).Foreground(toColor(scale)))
+			}
+		}
+		r.screen.Show()
+	}
+
+	draw()
+	eq := r.screen.EventQ()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ev := <-eq:
+			switch ev := ev.(type) {
+			case *tcell.EventResize:
+				r.screen.Sync()
+				draw()
+			case *tcell.EventKey:
+				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC || ev.Str() == "q" {
+					return nil
+				}
+			}
+		}
+	}
 }
 
 // text draws a single-width string and returns the next x. Every glyph raincast
