@@ -125,6 +125,7 @@ type call struct {
 	errProb float64
 	http    bool   // attach OLD-semconv http attrs to the callee span
 	method  string // used when http
+	target  string // request target path (http.target); just the path, no method
 	status  int    // used when http
 }
 
@@ -133,14 +134,14 @@ func downstreamsFor(r route, storm bool) []call {
 	switch {
 	case strings.HasPrefix(r.path, "/api/"), r.path == "/feed":
 		return []call{
-			{service: "api", name: r.method + " " + r.path, ms: max(1, r.ms/2), http: true, method: r.method, status: r.status},
+			{service: "api", name: r.method + " " + r.path, target: r.path, ms: max(1, r.ms/2), http: true, method: r.method, status: r.status},
 			{service: "orders-db", name: dbOp(r.path), ms: max(1, r.ms/3), errProb: 0.02},
 		}
 	case r.path == "/login":
 		return []call{{service: "auth", name: "auth.verify", ms: 80, errProb: 0.05}}
 	case r.path == "/checkout":
 		return []call{
-			{service: "api", name: "POST /checkout", ms: 120, http: true, method: "POST", status: r.status},
+			{service: "api", name: "POST /checkout", target: "/checkout", ms: 120, http: true, method: "POST", status: r.status},
 			{service: "orders-db", name: "INSERT orders", ms: 200, errProb: 0.04},
 			{service: "cache", name: "SET cart:session", ms: 15},
 			{service: "payments", name: "charge card", ms: 400, errProb: pickF(storm, 0.3, 0.08)},
@@ -246,7 +247,7 @@ func (g *gen) downstream(ctx context.Context, c call) {
 		// OLD semconv keys on purpose — this is the drift the receiver shim handles.
 		server.SetAttributes(
 			attribute.String("http.method", c.method),
-			attribute.String("http.target", c.name),
+			attribute.String("http.target", c.target), // path only — span name keeps the method
 			attribute.Int("http.status_code", c.status),
 		)
 	}
