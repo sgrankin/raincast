@@ -94,6 +94,15 @@ type Renderer struct {
 	rev            string
 	minContrast    float64       // match the terminal's minimum-contrast; <=1 disables
 	replayDelay    time.Duration // playout buffer depth; <=0 spawns on arrival
+
+	panelH     int         // bottom log/span panel height in rows; 0 disables
+	panelLines []panelLine // ring of the most recent formatted event lines
+}
+
+// panelLine is one formatted, colored line in the scrolling event panel.
+type panelLine struct {
+	text string
+	col  theme.RGB
 }
 
 // Config holds renderer options.
@@ -108,6 +117,9 @@ type Config struct {
 	// their true relative times delayed by this much, so bursty (batched) exports
 	// still render as smooth real-time rain. <=0 spawns on arrival.
 	ReplayDelay time.Duration
+	// LogPanel reserves this many bottom rows for a scrolling panel that tails
+	// decoded events (logs and spans) as text. 0 disables it.
+	LogPanel int
 }
 
 // New builds a Renderer over a tcell screen (not yet initialized).
@@ -117,7 +129,7 @@ func New(screen tcell.Screen, pal theme.Palette, cfg Config) *Renderer {
 	}
 	return &Renderer{
 		screen: screen, pal: pal, fps: cfg.FPS, rev: buildRev(),
-		minContrast: cfg.MinContrast, replayDelay: cfg.ReplayDelay,
+		minContrast: cfg.MinContrast, replayDelay: cfg.ReplayDelay, panelH: cfg.LogPanel,
 	}
 }
 
@@ -135,7 +147,7 @@ func toColor(c theme.RGB) tcell.Color { return tcell.NewRGBColor(int32(c.R), int
 func (r *Renderer) resize(c cells) {
 	w, h := c.Size()
 	r.cols = w
-	r.rainRows = h - 2
+	r.rainRows = h - 2 - r.panelH // top HUD + bottom HUD + optional panel
 	if r.rainRows < 1 {
 		r.rainRows = 1
 	}
@@ -206,6 +218,7 @@ func (r *Renderer) Run(ctx context.Context, events <-chan model.Event, s *sim.Si
 			}
 			for _, e := range pb.Release(now) {
 				s.Ingest(e)
+				r.pushPanel(e)
 			}
 			if !paused {
 				s.Advance(dt)
@@ -292,7 +305,93 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 		}
 	}
 	r.drawHUD(c, s)
+	r.drawPanel(c)
 	c.Show()
+}
+
+// pushPanel formats an event and appends it to the panel ring (newest last),
+// keeping only the visible rows. No-op when the panel is disabled.
+func (r *Renderer) pushPanel(ev model.Event) {
+	if r.panelH <= 0 {
+		return
+	}
+	text, col := panelFormat(ev, r.pal)
+	if text == "" {
+		return
+	}
+	r.panelLines = append(r.panelLines, panelLine{text, col})
+	if len(r.panelLines) > r.panelH {
+		r.panelLines = r.panelLines[len(r.panelLines)-r.panelH:]
+	}
+}
+
+// drawPanel renders the event panel just above the bottom HUD, oldest line at
+// the top so new lines scroll up from the bottom.
+func (r *Renderer) drawPanel(c cells) {
+	if r.panelH <= 0 {
+		return
+	}
+	_, h := c.Size()
+	top := h - 1 - r.panelH // rows [top, h-2]; h-1 is the bottom HUD
+	bg := toColor(r.pal.Bg)
+	n := len(r.panelLines)
+	for i := 0; i < r.panelH; i++ {
+		idx := n - r.panelH + i
+		if idx < 0 || idx >= n {
+			continue
+		}
+		ln := r.panelLines[idx]
+		st := tcell.StyleDefault.Background(bg).Foreground(toColor(ln.col))
+		r.text(c, 1, top+i, ln.text, st)
+	}
+}
+
+// panelFormat renders one event as a colored text line for the panel.
+func panelFormat(ev model.Event, pal theme.Palette) (string, theme.RGB) {
+	switch e := ev.(type) {
+	case model.SpanEvent:
+		if e.Method != "" || e.Route != "" { // request
+			line := fmt.Sprintf("%c %3d  %-8s %-6s %-24s %6.0fms",
+				sim.HeadGlyph(e.Method), e.Status, ptrunc(e.Service, 8), e.Method, ptrunc(e.Route, 24), e.MS)
+			return line, pal.StatusColor(e.Status)
+		}
+		col := pal.Dim // child span
+		if e.Err {
+			col = pal.Status[5]
+		}
+		return fmt.Sprintf("  └ %-8s %-28s %6.0fms", ptrunc(e.Service, 8), ptrunc(e.Name, 28), e.MS), col
+	case model.LogEvent:
+		return fmt.Sprintf("✦ %-5s %-8s %s", panelSev(e.Sev), ptrunc(e.Service, 8), ptrunc(e.Body, 40)), pal.Severity(e.Sev)
+	}
+	return "", pal.Fg
+}
+
+func panelSev(sev int) string {
+	switch {
+	case sev >= 21:
+		return "FATAL"
+	case sev >= 17:
+		return "ERROR"
+	case sev >= 13:
+		return "WARN"
+	case sev >= 9:
+		return "INFO"
+	case sev >= 5:
+		return "DEBUG"
+	default:
+		return "TRACE"
+	}
+}
+
+func ptrunc(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return string(r[:n])
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func (r *Renderer) drawHUD(c cells, s *sim.Sim) {

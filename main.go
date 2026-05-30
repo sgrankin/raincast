@@ -35,6 +35,7 @@ func main() {
 	maxFall := flag.Float64("max-fall", 16, "fastest fall (cells/s)")
 	minContrast := flag.Float64("min-contrast", 1.1, "match the terminal's minimum-contrast; tail glyphs dimmer than this clear instead of being boosted (<=1 disables)")
 	replayDelay := flag.Duration("replay-delay", 2*time.Second, "playout buffer depth; reconstructs real request timing from span timestamps regardless of the app's export batching (set >= the app's batch interval; 0 spawns on arrival)")
+	logPanel := flag.Int("log-panel", 0, "reserve this many bottom rows for a scrolling panel tailing decoded events (logs + spans) as text; 0 disables")
 	children := flag.Bool("children", true, "render child (downstream) spans as trailing droplets in the trace's lane")
 	diag := flag.Bool("diag", false, "render a color/brightness diagnostic and exit on q")
 	flag.Parse()
@@ -60,7 +61,7 @@ func main() {
 		runErr = runPrinter(ctx, events, *themeFlag, *colorFlag)
 	} else {
 		simCfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall, Children: *children}
-		rndCfg := render.Config{FPS: *fps, MinContrast: *minContrast, ReplayDelay: *replayDelay}
+		rndCfg := render.Config{FPS: *fps, MinContrast: *minContrast, ReplayDelay: *replayDelay, LogPanel: *logPanel}
 		runErr = runRain(ctx, events, *themeFlag, rndCfg, simCfg)
 	}
 

@@ -143,6 +143,35 @@ func TestContrastClear(t *testing.T) {
 	}
 }
 
+func TestLogPanelTailsEvents(t *testing.T) {
+	c := newFakeCells(60, 16)
+	r := New(nil, theme.Of(theme.Dark), Config{FPS: 30, LogPanel: 4})
+	r.resize(c)
+	s := sim.New(sim.Config{LaneKey: "trace", Children: true, MinFall: 4, MaxFall: 16}, r.cols, r.rainRows)
+
+	// The panel shrinks the rain field.
+	if r.rainRows != 16-2-4 {
+		t.Errorf("rainRows = %d, want %d (panel reserves 4)", r.rainRows, 16-2-4)
+	}
+	// Feed a request, a child, and a log (as Run would on release).
+	for _, ev := range []model.Event{
+		model.SpanEvent{Method: "GET", Route: "/api/users", Status: 200, MS: 45, Service: "gateway", TraceID: "t"},
+		model.SpanEvent{Name: "SELECT users", ParentID: "p", TraceID: "t", Kind: 3, MS: 12, Service: "orders-db"},
+		model.LogEvent{TraceID: "t", Sev: 17, Body: "query failed", Service: "orders-db"},
+	} {
+		s.Ingest(ev)
+		r.pushPanel(ev)
+	}
+	r.paint(c, s)
+	dump := c.dump()
+	t.Logf("\n%s", dump)
+	for _, want := range []string{"/api/users", "SELECT users", "query failed", "ERROR"} {
+		if !strings.Contains(dump, want) {
+			t.Errorf("panel missing %q", want)
+		}
+	}
+}
+
 func TestPaintEmptyFieldStillDrawsHUD(t *testing.T) {
 	c := newFakeCells(40, 8)
 	r := New(nil, theme.Of(theme.Light), Config{FPS: 30})

@@ -21,6 +21,15 @@ var headGlyphs = map[string]rune{
 	"DELETE": '✕', "HEAD": '∘', "OPTIONS": '⌥',
 }
 
+// HeadGlyph returns the head glyph for an HTTP method, or '·' if unknown. Shared
+// by the rain and the log panel so a method maps to one glyph everywhere.
+func HeadGlyph(method string) rune {
+	if g, ok := headGlyphs[method]; ok {
+		return g
+	}
+	return '·'
+}
+
 // sigils are handed out to hot routes — same pool as the prototype.
 var sigils = []rune{'⊕', '♡', '⌑', '◈', '✦', '⟁', '⌬', '⎔', '◉', '⊗', '✧', '⟐', '◌', '⍟', '⌖', '❖', '⊚', '✺'}
 
@@ -139,10 +148,7 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 	if s.cols <= 0 {
 		return
 	}
-	head := headGlyphs[e.Method]
-	if head == 0 {
-		head = '·'
-	}
+	head := HeadGlyph(e.Method)
 
 	var body []rune
 	if sig := s.sigilFor(e.Route); sig != 0 {
