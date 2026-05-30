@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/sgrankin/raincast/model"
@@ -157,6 +158,16 @@ func TestSigilLRUEviction(t *testing.T) {
 	}
 	if g := s.sigilFor("/a"); g != 0 {
 		t.Errorf("/a was evicted, should return 0 until re-earned, got %q", g)
+	}
+}
+
+func TestHitsMapBounded(t *testing.T) {
+	s := New(Config{DictCap: 4}, 80, 24)
+	for i := 0; i < 5000; i++ { // a flood of distinct routes, each seen once
+		s.sigilFor(fmt.Sprintf("/p/%d", i))
+	}
+	if len(s.hits) > maxHitsTracked {
+		t.Errorf("hits map unbounded under route flood: %d (cap %d)", len(s.hits), maxHitsTracked)
 	}
 }
 

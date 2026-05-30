@@ -26,8 +26,14 @@ type Buffer struct {
 // New returns a buffer with the given playout delay.
 func New(delay time.Duration) *Buffer { return &Buffer{delay: delay} }
 
-// Add buffers an event that arrived at wall time now.
+// Add buffers an event that arrived at wall time now. Events with no usable
+// timestamp (a malformed or not-yet-ended span reports 0) are dropped: they
+// can't be time-shifted, and letting one set the origin would peg the release
+// threshold ~56 years in the past and wedge the buffer (unbounded growth).
 func (b *Buffer) Add(ev model.Event, now time.Time) {
+	if ev.When() == 0 {
+		return
+	}
 	if !b.have {
 		b.have, b.base, b.wall = true, ev.When(), now
 	}

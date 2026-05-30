@@ -144,10 +144,23 @@ func toColor(c theme.RGB) tcell.Color { return tcell.NewRGBColor(int32(c.R), int
 
 // resize recomputes the field geometry from the draw target. Row 0 and the last
 // row are HUD; the rain falls in between.
+// effPanelH is the panel height that fits the current screen: capped so at least
+// one rain row and both HUD rows survive on a short terminal.
+func (r *Renderer) effPanelH(h int) int {
+	p := r.panelH
+	if max := h - 3; p > max {
+		p = max
+	}
+	if p < 0 {
+		p = 0
+	}
+	return p
+}
+
 func (r *Renderer) resize(c cells) {
 	w, h := c.Size()
 	r.cols = w
-	r.rainRows = h - 2 - r.panelH // top HUD + bottom HUD + optional panel
+	r.rainRows = h - 2 - r.effPanelH(h) // top HUD + bottom HUD + optional panel
 	if r.rainRows < 1 {
 		r.rainRows = 1
 	}
@@ -328,15 +341,16 @@ func (r *Renderer) pushPanel(ev model.Event) {
 // drawPanel renders the event panel just above the bottom HUD, oldest line at
 // the top so new lines scroll up from the bottom.
 func (r *Renderer) drawPanel(c cells) {
-	if r.panelH <= 0 {
+	_, h := c.Size()
+	ph := r.effPanelH(h)
+	if ph <= 0 {
 		return
 	}
-	_, h := c.Size()
-	top := h - 1 - r.panelH // rows [top, h-2]; h-1 is the bottom HUD
+	top := h - 1 - ph // rows [top, h-2]; h-1 is the bottom HUD
 	bg := toColor(r.pal.Bg)
 	n := len(r.panelLines)
-	for i := 0; i < r.panelH; i++ {
-		idx := n - r.panelH + i
+	for i := 0; i < ph; i++ {
+		idx := n - ph + i
 		if idx < 0 || idx >= n {
 			continue
 		}

@@ -218,6 +218,9 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 const (
 	childHead  = '·'
 	sparkGlyph = '✦'
+
+	// maxHitsTracked bounds the pre-assignment hit-counter map (see sigilFor).
+	maxHitsTracked = 512
 )
 
 // spawnLog adds a log spark: a single severity-colored glyph that falls in its
@@ -326,6 +329,13 @@ func (s *Sim) sigilFor(route string) rune {
 	if g, ok := s.dict[route]; ok {
 		s.lru[route] = s.tick // touch: keep hot routes from being evicted
 		return g
+	}
+	// dict and lru are LRU-bounded by DictCap, but hits (partial counts for routes
+	// not yet at 3 hits) would grow without bound under a flood of distinct routes
+	// (e.g. url.path with ids). Bound it: a route flood that big isn't "hot"
+	// anyway, so dropping partial counts just makes them re-earn.
+	if _, seen := s.hits[route]; !seen && len(s.hits) >= maxHitsTracked {
+		s.hits = map[string]int{}
 	}
 	if s.hits[route]++; s.hits[route] < 3 {
 		return 0

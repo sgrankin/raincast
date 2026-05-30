@@ -66,6 +66,23 @@ func TestReleasesInTimeOrderDespiteArrivalOrder(t *testing.T) {
 	}
 }
 
+// A malformed first event (timestamp 0) must not become the origin, or the
+// release threshold pegs ~56 years back and the buffer wedges + leaks.
+func TestDropsZeroTimestamp(t *testing.T) {
+	b := New(time.Second)
+	t0 := time.Unix(0, 0)
+	b.Add(span(0), t0) // malformed/unended — dropped, must not set the origin
+	base := uint64(1_000 * time.Second)
+	b.Add(span(base), t0)
+	if b.Pending() != 1 {
+		t.Fatalf("pending=%d, want 1 (zero-timestamp event dropped)", b.Pending())
+	}
+	got := b.Release(t0.Add(1500 * time.Millisecond))
+	if len(got) != 1 || got[0].When() != base {
+		t.Fatalf("release=%v, want [base] (origin is the valid event, not 0)", times(got, base))
+	}
+}
+
 func times(evs []model.Event, base uint64) []int64 {
 	out := make([]int64, len(evs))
 	for i, e := range evs {
