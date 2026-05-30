@@ -24,13 +24,14 @@ const (
 	clearBelow    = 0.05 // brightness at which a cell is cleared
 
 	// A terminal cell can't glow, so the head must win on brightness alone: it
-	// burns at full hue while the body starts well below it and fades up. The gap
-	// (1.0 vs bodyTop) is what makes the leading glyph read as the bright drop
-	// leading its trail, rather than one bright symbol among a bright column.
+	// burns at full hue while the body fades from bodyTop (just behind the head)
+	// to bodyFloor (the trail's top). The fade is scaled across each drop's own
+	// length so even a short drop dims to the floor at its top — a terminal has
+	// no canvas persistence to stretch a short trail's fade the way the prototype
+	// did.
 	headBright = 1.0
 	bodyTop    = 0.55
-	bodyStep   = 0.07
-	bodyFloor  = 0.12
+	bodyFloor  = 0.10
 )
 
 // cells is the drawing subset of tcell.Screen that painting needs. Abstracting it
@@ -187,9 +188,13 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 				ch, b = d.Head, headBright // leading glyph, full hue
 			} else {
 				ch = d.Body[j-1]
-				if b = bodyTop - float64(j-1)*bodyStep; b < bodyFloor {
-					b = bodyFloor
+				// Fade across the whole body: j=1 (behind head) is brightest,
+				// j=len (trail top) reaches the floor — independent of length.
+				frac := 0.0
+				if n := len(d.Body); n > 1 {
+					frac = float64(n-j) / float64(n-1)
 				}
+				b = bodyFloor + (bodyTop-bodyFloor)*frac
 			}
 			r.grid[row][d.Lane] = vcell{ch: ch, col: col, b: b * d.Alpha}
 		}
