@@ -77,15 +77,19 @@ type Config struct {
 	DictCap          int
 	MinFall, MaxFall float64 // cells/sec; slowest, fastest
 	Children         bool    // spawn child droplets for downstream (non-HTTP) spans
+	MaxDrops         int     // cap on live drops (flood protection); 0 = auto from field size
 }
 
 // Sim owns all mutable rain state.
 type Sim struct {
 	cfg        Config
 	cols, rows int
+	maxDrops   int // live-drop cap (flood protection), resolved in Resize
 	drops      []*Drop
-	dict       map[string]rune // route -> sigil
-	hits       map[string]int  // route -> hit count (until assigned)
+	dict       map[string]rune   // route -> sigil
+	hits       map[string]int    // route -> hit count (until assigned)
+	lru        map[string]uint64 // route -> last-used tick, for sigil LRU eviction
+	tick       uint64            // monotonic counter for LRU recency
 	index      map[string]*Drop
 	weather    *weather
 }
@@ -104,11 +108,14 @@ func New(cfg Config, cols, rows int) *Sim {
 	if cfg.MinFall > cfg.MaxFall { // tolerate a flipped flag pair
 		cfg.MinFall, cfg.MaxFall = cfg.MaxFall, cfg.MinFall
 	}
-	return &Sim{
-		cfg: cfg, cols: cols, rows: rows,
-		dict: map[string]rune{}, hits: map[string]int{}, index: map[string]*Drop{},
+	s := &Sim{
+		cfg: cfg,
+		dict: map[string]rune{}, hits: map[string]int{}, lru: map[string]uint64{},
+		index:   map[string]*Drop{},
 		weather: newWeather(),
 	}
+	s.Resize(cols, rows)
+	return s
 }
 
 // Resize updates the field dimensions. Drops keep their lane; the renderer hides
@@ -116,6 +123,13 @@ func New(cfg Config, cols, rows int) *Sim {
 // clamping them here would collapse many lanes onto the last column on a shrink.
 func (s *Sim) Resize(cols, rows int) {
 	s.cols, s.rows = cols, rows
+	// Cap live drops for flood protection. Auto: a fraction of the field, so a
+	// runaway rps can't fill memory or clutter the lanes beyond readability.
+	if s.cfg.MaxDrops > 0 {
+		s.maxDrops = s.cfg.MaxDrops
+	} else if s.maxDrops = cols * rows / 4; s.maxDrops < cols {
+		s.maxDrops = cols
+	}
 }
 
 // Drops returns the live drops (read-only for the renderer).
@@ -130,6 +144,9 @@ func (s *Sim) DictSize() int { return len(s.dict) }
 // Ingest turns one event into rain. For now only HTTP request spans spawn drops;
 // child spans and logs land in later milestones.
 func (s *Sim) Ingest(ev model.Event) {
+	if s.maxDrops > 0 && len(s.drops) >= s.maxDrops {
+		return // at the flood cap — drop the newest until drops fall off
+	}
 	switch e := ev.(type) {
 	case model.SpanEvent:
 		switch {
@@ -296,25 +313,45 @@ func (s *Sim) lane(traceID, ip string) int {
 	return int(h.Sum32() % uint32(s.cols))
 }
 
-// sigilFor assigns a sigil after a route is seen a few times, capped at DictCap.
-// Once assigned (or the pool is full) it stops counting, bounding the hits map.
+// sigilFor assigns a sigil after a route is seen a few times. The pool is capped
+// at DictCap; once full, the least-recently-used route is evicted and its sigil
+// reused — so a flood of distinct routes (e.g. http.route missing and url.path
+// carrying ids) keeps the dictionary tracking the *currently* hot routes rather
+// than freezing on whatever filled it first.
 func (s *Sim) sigilFor(route string) rune {
 	if route == "" {
 		return 0
 	}
-	if r, ok := s.dict[route]; ok {
-		return r
+	s.tick++
+	if g, ok := s.dict[route]; ok {
+		s.lru[route] = s.tick // touch: keep hot routes from being evicted
+		return g
 	}
-	if len(s.dict) >= s.cfg.DictCap {
+	if s.hits[route]++; s.hits[route] < 3 {
 		return 0
 	}
-	if s.hits[route]++; s.hits[route] >= 3 {
-		r := sigils[len(s.dict)]
-		s.dict[route] = r
-		delete(s.hits, route)
-		return r
+	delete(s.hits, route)
+
+	var g rune
+	if len(s.dict) < s.cfg.DictCap {
+		g = sigils[len(s.dict)] // pool not full yet — take the next glyph
+	} else {
+		// Evict the least-recently-used route and reuse its glyph. Drops already
+		// on screen keep the glyph baked into their body, so this only affects
+		// future spawns of the evicted route.
+		evict, oldest := "", uint64(math.MaxUint64)
+		for rt, t := range s.lru {
+			if t < oldest {
+				oldest, evict = t, rt
+			}
+		}
+		g = s.dict[evict]
+		delete(s.dict, evict)
+		delete(s.lru, evict)
 	}
-	return 0
+	s.dict[route] = g
+	s.lru[route] = s.tick
+	return g
 }
 
 // Advance steps physics by dt seconds and evicts finished drops.

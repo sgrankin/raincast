@@ -131,6 +131,45 @@ func TestLogSparkInTraceLane(t *testing.T) {
 	}
 }
 
+func TestSigilLRUEviction(t *testing.T) {
+	s := New(Config{DictCap: 2}, 80, 24)
+	hit3 := func(route string) rune {
+		var g rune
+		for i := 0; i < 3; i++ {
+			g = s.sigilFor(route)
+		}
+		return g
+	}
+	ga, gb := hit3("/a"), hit3("/b")
+	if ga == 0 || gb == 0 || ga == gb {
+		t.Fatalf("/a,/b should get distinct sigils, got %q %q", ga, gb)
+	}
+	if s.DictSize() != 2 {
+		t.Fatalf("dict size %d, want 2", s.DictSize())
+	}
+	s.sigilFor("/b")       // touch /b so /a becomes least-recently-used
+	gc := hit3("/c")       // /c earns a sigil → evicts /a, reuses its glyph
+	if s.DictSize() != 2 { // pool stays capped
+		t.Errorf("dict size %d after eviction, want 2", s.DictSize())
+	}
+	if gc != ga {
+		t.Errorf("evicted /a's glyph should be reused for /c: gc=%q ga=%q", gc, ga)
+	}
+	if g := s.sigilFor("/a"); g != 0 {
+		t.Errorf("/a was evicted, should return 0 until re-earned, got %q", g)
+	}
+}
+
+func TestFloodCap(t *testing.T) {
+	s := New(Config{MaxDrops: 3}, 80, 24)
+	for i := 0; i < 10; i++ {
+		s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, TraceID: "t"})
+	}
+	if got := len(s.Drops()); got != 3 {
+		t.Errorf("flood cap MaxDrops=3: %d drops, want 3", got)
+	}
+}
+
 func TestForecastReactsTo5xx(t *testing.T) {
 	s := newTestSim()
 	for i := 0; i < 20; i++ {

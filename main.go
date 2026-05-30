@@ -37,6 +37,7 @@ func main() {
 	replayDelay := flag.Duration("replay-delay", 2*time.Second, "playout buffer depth; reconstructs real request timing from span timestamps regardless of the app's export batching (set >= the app's batch interval; 0 spawns on arrival)")
 	logPanel := flag.Int("log-panel", 0, "reserve this many bottom rows for a scrolling panel tailing decoded events (logs + spans) as text; 0 disables")
 	children := flag.Bool("children", true, "render child (downstream) spans as trailing droplets in the trace's lane")
+	maxDrops := flag.Int("max-drops", 0, "cap on live drops (flood protection); 0 = auto from field size")
 	diag := flag.Bool("diag", false, "render a color/brightness diagnostic and exit on q")
 	flag.Parse()
 
@@ -60,7 +61,7 @@ func main() {
 	if *printMode {
 		runErr = runPrinter(ctx, events, *themeFlag, *colorFlag)
 	} else {
-		simCfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall, Children: *children}
+		simCfg := sim.Config{LaneKey: *laneKey, DictCap: *dictCap, MinFall: *minFall, MaxFall: *maxFall, Children: *children, MaxDrops: *maxDrops}
 		rndCfg := render.Config{FPS: *fps, MinContrast: *minContrast, ReplayDelay: *replayDelay, LogPanel: *logPanel}
 		runErr = runRain(ctx, events, *themeFlag, rndCfg, simCfg)
 	}
