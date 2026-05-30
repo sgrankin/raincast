@@ -81,6 +81,7 @@ var routes = []route{
 	{"POST", "/checkout", 500, 0, 1900, 1},
 	{"GET", "/admin", 403, 0, 12, 1},
 	{"GET", "/api/search", 200, 9800, 1400, 3},
+	{"GET", "/api/dashboard", 200, 1200, 90, 2}, // N+1: fans out into many queries
 	{"GET", "/img/hero.png", 200, 512000, 14, 4},
 	{"PATCH", "/api/cart", 200, 210, 60, 2},
 	{"DELETE", "/api/cart", 204, 0, 40, 1},
@@ -127,11 +128,18 @@ type call struct {
 	method  string // used when http
 	target  string // request target path (http.target); just the path, no method
 	status  int    // used when http
+	leaf    bool   // a bare query span (no client wrapper, no log) — for N+1 bursts
 }
 
 // downstreamsFor expands a route into the backend hops it triggers.
-func downstreamsFor(r route, storm bool) []call {
+func downstreamsFor(r route, storm bool, nPlusOne int) []call {
 	switch {
+	case r.path == "/api/dashboard": // an N+1: one api call, then a burst of identical queries
+		cs := []call{{service: "api", name: "GET /api/dashboard", target: "/api/dashboard", ms: max(1, r.ms/5), http: true, method: "GET", status: r.status}}
+		for i := 0; i < nPlusOne; i++ {
+			cs = append(cs, call{service: "orders-db", name: "SELECT widget", ms: 1 + i%3, errProb: 0.003, leaf: true})
+		}
+		return cs
 	case strings.HasPrefix(r.path, "/api/"), r.path == "/feed":
 		return []call{
 			{service: "api", name: r.method + " " + r.path, target: r.path, ms: max(1, r.ms/2), http: true, method: r.method, status: r.status},
@@ -197,6 +205,7 @@ type gen struct {
 	loggers   map[string]otellog.Logger
 	baseRPS   float64
 	timeScale float64
+	nPlusOne  int // query count for the /api/dashboard N+1 route
 }
 
 // request serves one synthetic request as a full cross-service trace rooted at
@@ -217,7 +226,7 @@ func (g *gen) request(storm bool) {
 	g.emitLog("gateway", ctx, otellog.SeverityInfo, "INFO", fmt.Sprintf("%s %s", r.method, r.path))
 
 	g.sleep(max(1, r.ms/4)) // gateway's own work before fanning out
-	for _, c := range downstreamsFor(r, storm) {
+	for _, c := range downstreamsFor(r, storm, g.nPlusOne) {
 		g.downstream(ctx, c)
 	}
 
@@ -241,6 +250,18 @@ func (g *gen) request(storm bool) {
 // downstream models a single backend hop: a CLIENT span on the caller wrapping a
 // SERVER span on the callee, sharing the trace so children trail their parent.
 func (g *gen) downstream(ctx context.Context, c call) {
+	if c.leaf {
+		// A bare query span (e.g. one of an N+1 burst): no client wrapper, no log,
+		// just the call. It's a child of the request, so it renders as a droplet.
+		_, q := g.tracers[c.service].Start(ctx, c.name, trace.WithSpanKind(trace.SpanKindClient))
+		g.sleep(c.ms)
+		if rand.Float64() < c.errProb {
+			q.SetStatus(codes.Error, "query failed")
+			q.RecordError(fmt.Errorf("%s failed", c.name))
+		}
+		q.End()
+		return
+	}
 	ctx, client := g.tracers["gateway"].Start(ctx, "→ "+c.service, trace.WithSpanKind(trace.SpanKindClient))
 	cctx, server := g.tracers[c.service].Start(ctx, c.name, trace.WithSpanKind(trace.SpanKindServer))
 	if c.http {
@@ -332,6 +353,7 @@ func main() {
 	dur := flag.Duration("duration", 0, "run duration; 0 = until interrupted")
 	timeScale := flag.Float64("time-scale", 1, "divide simulated latencies by this to speed up wall-clock")
 	batch := flag.Duration("batch", time.Second, "exporter batch interval (simulates a real app's export batching; OTel's default is 5s)")
+	nPlusOne := flag.Int("n-plus-one", 30, "queries the /api/dashboard route fans out into (an N+1 burst); 0 disables")
 	flag.Parse()
 	if *timeScale <= 0 {
 		*timeScale = 1
@@ -371,6 +393,7 @@ func main() {
 		loggers:   map[string]otellog.Logger{},
 		baseRPS:   *rps,
 		timeScale: *timeScale,
+		nPlusOne:  *nPlusOne,
 	}
 	var flushes, shutdowns []func(context.Context) error
 	for _, s := range services {
