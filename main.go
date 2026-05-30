@@ -24,8 +24,9 @@ func main() {
 	bufSize := flag.Int("buffer", 1024, "event buffer depth before backpressure drops")
 	flag.Parse()
 
-	mode := theme.Detect(*themeFlag)
-	pen := theme.NewPen(mode, colorEnabled(*colorFlag, os.Stdout))
+	color := colorEnabled(*colorFlag, os.Stdout)
+	mode := theme.Detect(*themeFlag, color) // OSC 11 query only when interactive
+	pen := theme.NewPen(mode, color)
 	printer := console.NewPrinter(os.Stdout, pen)
 
 	// Single consumer goroutine owns all printing — no locks needed.

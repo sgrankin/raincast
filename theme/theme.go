@@ -95,16 +95,25 @@ func (p Palette) Severity(sev int) RGB {
 }
 
 // Detect resolves a mode from an explicit flag value ("dark", "light", or
-// "auto"). "auto" inspects COLORFGBG — many terminals set it as "fg;bg" (or
-// "fg;default;bg"); a trailing background of 7 or 15 means a light theme. When
-// undetectable it falls back to Dark, which is the safe default for a
-// full-screen rain animation.
-func Detect(flag string) Mode {
+// "auto"). For "auto" it tries, in order:
+//
+//  1. an OSC 11 background-color query to the terminal (only when interactive —
+//     i.e. we're actually driving a terminal, not a pipe). This is the reliable
+//     signal; most terminals answer it.
+//  2. COLORFGBG ("fg;bg" or "fg;default;bg"); a trailing background of 7 or 15
+//     means light. Legacy, and unset on most modern terminals.
+//  3. Dark — the safe default for a full-screen rain animation.
+func Detect(flag string, interactive bool) Mode {
 	switch strings.ToLower(strings.TrimSpace(flag)) {
 	case "light":
 		return Light
 	case "dark":
 		return Dark
+	}
+	if interactive {
+		if m, ok := queryBackgroundMode(); ok {
+			return m
+		}
 	}
 	if fgbg := os.Getenv("COLORFGBG"); fgbg != "" {
 		parts := strings.Split(fgbg, ";")
