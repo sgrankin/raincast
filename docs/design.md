@@ -32,7 +32,19 @@ versions stay consistent. (It predates the rename; its title still reads
   OSC 11 background query (COLORFGBG fallback).
 - ✅ **Synthetic generator** (`cmd/raintraffic`) — multi-service OTLP traffic on
   the real OTel SDK, for driving the display without a real app.
-- 🔨 **Rain display** — the tcell game loop. In progress.
+- ✅ **Rain display** — the tcell game loop: request drops (method→glyph,
+  status→hue, route→learned sigil, latency→fall, bytes→tail), brightness-buffer
+  trails, weather HUD, pause/resize/themes, contrast-aware tail clearing.
+- ✅ **Child droplets** — downstream spans trail their request in-lane (the trace
+  waterfall); `--children`.
+- ✅ **Log sparks** — logs spark down their trace's lane in severity color
+  (overrides status); orphans scatter into the field.
+- ✅ **Replay** — a playout buffer (`--replay-delay`) reconstructs real request
+  timing from span timestamps, so the rain stays smooth regardless of the app's
+  export batching.
+- ✅ **Log panel** — `--log-panel N` tails decoded events as text below the field.
+- ✅ **Polish** — LRU sigil dictionary, flood cap (`--max-drops`), 256-color via
+  tcell downsampling.
 - ⏳ **Metrics** — deferred; span-count rps is good enough for the weather.
 
 ---
@@ -241,38 +253,43 @@ ambiguity, so metrics are deferred until span-count rps proves insufficient.
 ## Remaining milestones
 
 1. ✅ Receiver (traces + logs) → normalized events → console.
-2. 🔨 **Rain display** — tcell game loop: port encoding + physics, brightness-buffer
-   trails, lane assignment, dictionary, weather HUD. Consumes the live event stream
-   directly (the receiver + generator already exist, so there's no synthetic-only
-   phase). *Verify:* it rains, routes collapse to sigils, weather updates, resize works.
-3. **Logs as sparks** — off parents via the trace index; orphan/late logs as field
-   glyphs by severity.
-4. **Child spans as trailing droplets** — the trace waterfall.
-5. **Polish** — sampling under flood, 256-color fallback, pause, graceful shutdown,
-   LRU dictionary eviction.
-6. **Metrics → real rps** (only if span-count rps proves insufficient).
+2. ✅ **Rain display** — tcell game loop: encoding + physics, brightness-buffer
+   trails, lane assignment, dictionary, weather HUD, pause/resize/themes.
+3. ✅ **Logs as sparks** — severity-colored glyph in the trace's lane (overrides
+   status); orphans scatter into the field. (Replay time-orders logs with their
+   spans, so the spec's separate late-arrival buffer wasn't needed.)
+4. ✅ **Child spans as trailing droplets** — the trace waterfall; lane shared via
+   trace-id hash (no index lookup).
+5. ✅ **Polish** — flood cap, LRU dictionary eviction, 256-color via tcell
+   downsampling, pause + graceful shutdown.
+6. ✅ **Replay** — playout buffer; reconstructs real timing from span timestamps.
+7. ✅ **Log panel** — scrolling text tail of decoded events.
+8. **Metrics → real rps** (deferred; only if span-count rps proves insufficient).
 
 ---
 
 ## CLI
 
-Built (`raincast`):
+`raincast`:
 ```
---listen   :4317              OTLP/gRPC listen address
---theme    auto|dark|light    palette (auto = OSC 11 query, then COLORFGBG, then dark)
---color    auto|always|never  ANSI output (auto = tty + NO_COLOR)
---buffer   1024               event buffer depth before drop-newest
---print                       (planned) use the line printer instead of the rain field
-```
-
-Planned for the rain field:
-```
---lane-key trace|client       lane assignment (default trace)
---fps      30                  render frames per second
---children true                render child spans as trailing droplets
---dict-cap 18                  max distinct route sigils before LRU eviction
---min-fall 4                   slowest fall (cells/s)
---max-fall 16                  fastest fall (cells/s)
+--listen        :4317           OTLP/gRPC listen address
+--theme         auto|dark|light palette (auto = OSC 11 query, then COLORFGBG, then dark)
+--color         auto|always|never  --print ANSI output (auto = tty + NO_COLOR)
+--min-contrast  1.1             match the terminal's minimum-contrast; dimmer tail glyphs
+                                clear instead of being boosted to white (<=1 disables)
+--buffer        1024            event channel depth before drop-newest
+--print                         line printer instead of the rain field
+--fps           30              render frames per second
+--lane-key      trace|client    lane assignment (default trace)
+--children      true            render child (downstream) spans as trailing droplets
+--dict-cap      18              max distinct route sigils (LRU-evicted when full)
+--min-fall      4               slowest fall (cells/s)
+--max-fall      16              fastest fall (cells/s)
+--max-drops     0               live-drop cap, flood protection (0 = auto, field/4)
+--replay-delay  2s              playout buffer depth; reconstructs real timing from span
+                                timestamps regardless of export batching (>= app batch; 0 = on arrival)
+--log-panel     0               reserve N bottom rows tailing decoded events as text
+--diag                          color/brightness diagnostic (block vs text ramps) and exit on q
 ```
 
 Generator (`cmd/raintraffic`):
@@ -281,6 +298,7 @@ Generator (`cmd/raintraffic`):
 --rps        12               base requests/sec (before jitter/storms)
 --duration   0                run duration; 0 = until interrupted
 --time-scale 1                divide simulated latencies (speed up wall-clock)
+--batch      1s               exporter batch interval (simulate a real app's batching)
 ```
 
 ---
@@ -303,9 +321,14 @@ raincast/
     detect_unix.go      /dev/tty OSC 11 query (build-tagged unix)
     detect_other.go     no-op fallback
     detect_test.go      OSC 11 parser tests
-  console/console.go    milestone-1 line renderer (debug view)
-  sim/                  (planned) drop state, physics, dictionary, weather, frame builder
-  render/               (planned) tcell loop, brightness buffer, palette → cells, input
+  console/console.go    --print line renderer (debug view)
+  theme/theme.go        + RGB.Luminance/Contrast (WCAG, matches Ghostty)
+  playout/playout.go    jitter buffer — replay events at true relative times
+  sim/
+    sim.go              drops, physics, eviction, LRU sigil dict, flood cap
+    weather.go          rolling window → forecast
+  render/
+    render.go           tcell game loop, brightness buffer, HUD, log panel, --diag
   cmd/raintraffic/      synthetic OTLP traffic generator
 ```
 
