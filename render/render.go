@@ -10,8 +10,6 @@ package render
 import (
 	"context"
 	"fmt"
-	"math"
-	"math/rand"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
@@ -24,7 +22,15 @@ import (
 const (
 	decayPerFrame = 0.80 // trail brightness multiplier per frame
 	clearBelow    = 0.05 // brightness at which a cell is cleared
-	corruptProb   = 0.20 // chance an errored drop's body glyph flickers to noise
+
+	// A terminal cell can't glow, so the head must win on brightness alone: it
+	// burns at full hue while the body starts well below it and fades up. The gap
+	// (1.0 vs bodyTop) is what makes the leading glyph read as the bright drop
+	// leading its trail, rather than one bright symbol among a bright column.
+	headBright = 1.0
+	bodyTop    = 0.55
+	bodyStep   = 0.07
+	bodyFloor  = 0.12
 )
 
 // cells is the drawing subset of tcell.Screen that painting needs. Abstracting it
@@ -178,12 +184,11 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 			var ch rune
 			var b float64
 			if j == 0 {
-				ch, b = d.Head, 1.0
+				ch, b = d.Head, headBright // leading glyph, full hue
 			} else {
 				ch = d.Body[j-1]
-				b = math.Max(0.15, 1-float64(j)*0.12)
-				if d.Err && rand.Float64() < corruptProb {
-					ch = sim.NoiseRune()
+				if b = bodyTop - float64(j-1)*bodyStep; b < bodyFloor {
+					b = bodyFloor
 				}
 			}
 			r.grid[row][d.Lane] = vcell{ch: ch, col: col, b: b * d.Alpha}

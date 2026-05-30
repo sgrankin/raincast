@@ -28,15 +28,19 @@ var sigils = []rune{'⊕', '♡', '⌑', '◈', '✦', '⟁', '⌬', '⎔', '◉
 // punctuation, all single display-width so the cell grid stays aligned).
 var noise = []rune("ｱｲｳｴｵｶｷｸ0101ｿﾀﾁｦﾇ<>=/{}#$%&*")
 
-// NoiseRune returns a random filler glyph. It's the single source of the noise
-// table — the renderer reuses it for error-corruption flicker, so the set
-// (all single display-width, to keep the grid aligned) can't drift between
-// the tails sim spawns and the glyphs render substitutes.
-func NoiseRune() rune { return noise[rand.Intn(len(noise))] }
+// noiseRune returns a random filler glyph for drop tails. The set is all single
+// display-width, keeping the cell grid aligned.
+func noiseRune() rune { return noise[rand.Intn(len(noise))] }
 
-// evapStartFrac is how far down the field a 404 drop falls before it begins to
-// evaporate (fade out) rather than fall all the way.
-const evapStartFrac = 0.55
+const (
+	// evapStartFrac is how far down a 404 drop falls before it evaporates rather
+	// than falling all the way.
+	evapStartFrac = 0.55
+	// spawnStaggerRows is the random head offset above the top at spawn, so a
+	// batch of requests arriving in one frame doesn't enter as a flat horizontal
+	// rank (the OTLP exporter batches, so arrivals are bursty).
+	spawnStaggerRows = 4.0
+)
 
 // Drop is one falling request (and, later, child droplets / sparks). Y is a
 // float row position (top = 0); the renderer floors it. Color is expressed as a
@@ -156,12 +160,12 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 		tail = 14
 	}
 	for len(body) < tail {
-		body = append(body, NoiseRune())
+		body = append(body, noiseRune())
 	}
 
 	d := &Drop{
 		Lane:    s.lane(e.TraceID, e.IP),
-		Y:       0,
+		Y:       -rand.Float64() * spawnStaggerRows,
 		Vy:      s.fall(e.MS),
 		Head:    head,
 		Body:    body,

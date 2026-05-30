@@ -60,7 +60,11 @@ type Palette struct {
 
 // dark carries the browser prototype's neon-on-black hues verbatim.
 var dark = Palette{
-	Status:  [6]RGB{2: {0x00, 0xff, 0x66}, 3: {0x00, 0xe5, 0xff}, 4: {0xff, 0xb0, 0x00}, 5: {0xff, 0x2b, 0x4e}},
+	// 3xx is a deepened azure-cyan rather than the prototype's #00e5ff: on a
+	// canvas with glow that bright cyan read as colored, but as a flat terminal
+	// cell at full brightness it reads as near-white. Deepening it keeps the
+	// leading drop unmistakably cyan.
+	Status:  [6]RGB{2: {0x00, 0xff, 0x66}, 3: {0x00, 0xaa, 0xd7}, 4: {0xff, 0xb0, 0x00}, 5: {0xff, 0x2b, 0x4e}},
 	SevLow:  RGB{0x6f, 0xcf, 0x9a},
 	SevWarn: RGB{0xff, 0xb0, 0x00},
 	SevErr:  RGB{0xff, 0x2b, 0x4e},

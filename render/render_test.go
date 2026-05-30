@@ -77,7 +77,8 @@ func TestPaintRendersRainAndHUD(t *testing.T) {
 		ev.TraceID = fmt.Sprintf("trace-%02d", i)
 		s.Ingest(ev)
 	}
-	for f := 0; f < 6; f++ {
+	// Enough frames for drops to fall in from the spawn stagger and leave trails.
+	for f := 0; f < 20; f++ {
 		s.Advance(1.0 / 30)
 		r.paint(c, s)
 	}
@@ -95,6 +96,31 @@ func TestPaintRendersRainAndHUD(t *testing.T) {
 	// more lit cells than the 5 heads alone.
 	if got := c.glyphsInRows(1, r.rainRows+1); got < 6 {
 		t.Errorf("expected several rain glyphs (heads + trails), got %d", got)
+	}
+}
+
+// The head must be the clear bright leader: brighter than the glyph immediately
+// behind it (a terminal can't glow, so brightness alone has to carry it).
+func TestHeadBrighterThanTrail(t *testing.T) {
+	c := newFakeCells(20, 22)
+	r := New(nil, theme.Of(theme.Dark), 30)
+	r.resize(c)
+	s := sim.New(sim.Config{LaneKey: "trace", MinFall: 4, MaxFall: 16}, r.cols, r.rainRows)
+	s.Ingest(model.SpanEvent{Method: "GET", Route: "/x", Status: 200, MS: 100, TraceID: "t"})
+
+	for i := 0; i < 30; i++ {
+		s.Advance(1.0 / 30)
+		r.paint(c, s)
+	}
+	d := s.Drops()[0]
+	headRow := int(d.Y)
+	if headRow < 1 || headRow >= r.rainRows {
+		t.Skipf("head off-screen at row %d", headRow)
+	}
+	head := r.grid[headRow][d.Lane].b
+	trail := r.grid[headRow-1][d.Lane].b
+	if head <= trail {
+		t.Errorf("head (%.2f) should be brighter than the glyph behind it (%.2f)", head, trail)
 	}
 }
 
