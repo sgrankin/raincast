@@ -20,9 +20,11 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -33,6 +35,25 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// rateLimitedErrors is the OTel global error handler. When raincast isn't
+// listening, exports fail continuously; without rate-limiting they'd bury the
+// terminal in connection errors. One line every few seconds is enough to tell
+// you the receiver is down.
+type rateLimitedErrors struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (h *rateLimitedErrors) Handle(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if time.Since(h.last) < 3*time.Second {
+		return
+	}
+	h.last = time.Now()
+	fmt.Fprintln(os.Stderr, "raintraffic: export failing (is raincast listening?):", err)
+}
 
 // route is one entry in the gateway's weighted endpoint table (ported from the
 // browser prototype): a representative method/path with a typical status, body
@@ -314,15 +335,29 @@ func main() {
 		*timeScale = 1
 	}
 
+	// Quiet, rate-limited reporting when the receiver is down.
+	otel.SetErrorHandler(&rateLimitedErrors{})
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	traceExp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint(*endpoint), otlptracegrpc.WithInsecure())
+	// Retry disabled: this is a dev generator pointed at a local tool, so a dead
+	// endpoint should fail fast (and shut down fast) rather than back off for a
+	// minute.
+	traceExp, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(*endpoint),
+		otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithRetry(otlptracegrpc.RetryConfig{Enabled: false}),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "trace exporter:", err)
 		os.Exit(1)
 	}
-	logExp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpoint(*endpoint), otlploggrpc.WithInsecure())
+	logExp, err := otlploggrpc.New(ctx,
+		otlploggrpc.WithEndpoint(*endpoint),
+		otlploggrpc.WithInsecure(),
+		otlploggrpc.WithRetry(otlploggrpc.RetryConfig{Enabled: false}),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "log exporter:", err)
 		os.Exit(1)
@@ -338,8 +373,17 @@ func main() {
 	var flushes, shutdowns []func(context.Context) error
 	for _, s := range services {
 		res := resource.NewSchemaless(attribute.String("service.name", s))
-		tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
-		lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
+		// Short flush interval (vs. the 5s default) so spans/logs reach raincast in
+		// a steady trickle — otherwise they arrive in 5s bursts and the rain falls
+		// in synchronized waves instead of a continuous stream.
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExp, sdktrace.WithBatchTimeout(200*time.Millisecond)),
+			sdktrace.WithResource(res),
+		)
+		lp := sdklog.NewLoggerProvider(
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp, sdklog.WithExportInterval(200*time.Millisecond))),
+			sdklog.WithResource(res),
+		)
 		g.tracers[s] = tp.Tracer("raintraffic")
 		g.loggers[s] = lp.Logger("raintraffic")
 		flushes = append(flushes, tp.ForceFlush, lp.ForceFlush)
@@ -355,12 +399,17 @@ func main() {
 	fmt.Fprintf(os.Stderr, "raintraffic → %s  base=%.0frps  services=%v\n", *endpoint, *rps, services)
 	g.run(ctx)
 
+	// Release the SIGINT handler now that run has returned: if the flush below
+	// hangs on a dead endpoint, a second Ctrl-C should force-quit (default
+	// behavior) rather than be swallowed by NotifyContext.
+	stop()
+
 	// Flush every provider through the shared exporters before shutting anything
 	// down (one Shutdown per provider would otherwise close a shared exporter
 	// out from under its siblings). Note: in-flight request goroutines (capped at
 	// maxConcurrent, mostly mid-sleep) may End a few spans in the window between
 	// flush and shutdown; for a generator that small tail loss is acceptable.
-	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	for _, f := range flushes {
 		_ = f(shutCtx)
