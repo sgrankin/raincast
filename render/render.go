@@ -287,21 +287,23 @@ func (r *Renderer) Diag(ctx context.Context) error {
 		dim := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Dim))
 		r.text(r.screen, 0, 0, fmt.Sprintf(" RAINCAST DIAG · TERM=%s COLORTERM=%s · build %s · q quits",
 			os.Getenv("TERM"), os.Getenv("COLORTERM"), r.rev), base)
-		r.text(r.screen, 0, 1, " each strip is one drop's trail: head (bright) left → tail (dim) right", dim)
+		r.text(r.screen, 0, 1, " one drop's trail: bright (left) → dim (right). 'block' vs 'text' should match.", dim)
+		r.text(r.screen, 0, 2, " if 'text' brightens at the dim (right) end but 'block' doesn't → terminal minimum-contrast.", dim)
 
 		labels := map[int]string{2: "2xx", 3: "3xx", 4: "4xx", 5: "5xx"}
 		const sw = 40
 		for ci, cl := range []int{2, 3, 4, 5} {
 			col := r.pal.Status[cl]
-			row := 3 + ci*3
-			r.text(r.screen, 0, row, labels[cl]+" blend", base)
-			r.text(r.screen, 0, row+1, "    scale", dim)
+			row := 4 + ci*3
+			r.text(r.screen, 0, row, labels[cl]+" block", base)
+			r.text(r.screen, 0, row+1, "    text ", dim)
 			for i := 0; i < sw; i++ {
 				b := 1.0 - float64(i)/float64(sw-1) // 1.0 → 0.0
-				blend := r.pal.Bg.Blend(col, b)
-				scale := theme.RGB{R: uint8(float64(col.R) * b), G: uint8(float64(col.G) * b), B: uint8(float64(col.B) * b)}
-				r.screen.SetContent(11+i, row, '█', nil, tcell.StyleDefault.Background(bg).Foreground(toColor(blend)))
-				r.screen.SetContent(11+i, row+1, '█', nil, tcell.StyleDefault.Background(bg).Foreground(toColor(scale)))
+				st := tcell.StyleDefault.Background(bg).Foreground(toColor(r.pal.Bg.Blend(col, b)))
+				// Same color via the exact rain path, drawn two ways: a block char
+				// (contrast-boost-exempt in most terminals) and a text glyph (boosted).
+				r.screen.SetContent(11+i, row, '█', nil, st)
+				r.screen.SetContent(11+i, row+1, 'ｷ', nil, st)
 			}
 		}
 		r.screen.Show()
