@@ -79,6 +79,34 @@ func TestDictionaryAssignsSigilAfterThreeHits(t *testing.T) {
 	}
 }
 
+func TestChildSpawnsInParentLane(t *testing.T) {
+	s := New(Config{LaneKey: "trace", Children: true, MinFall: 4, MaxFall: 16}, 80, 24)
+	// A request and a downstream child sharing the trace id.
+	s.Ingest(model.SpanEvent{Method: "GET", Route: "/api/users", Status: 200, TraceID: "t1"})
+	s.Ingest(model.SpanEvent{Name: "SELECT users", ParentID: "p", TraceID: "t1", Kind: 3, MS: 12})
+	ds := s.Drops()
+	if len(ds) != 2 {
+		t.Fatalf("want request + child = 2 drops, got %d", len(ds))
+	}
+	if ds[0].Lane != ds[1].Lane {
+		t.Errorf("child lane %d != request lane %d (should share, via trace hash)", ds[1].Lane, ds[0].Lane)
+	}
+	if !ds[1].Child {
+		t.Error("downstream span should be a Child drop")
+	}
+	if ds[1].Head != childHead {
+		t.Errorf("child head = %q, want %q", ds[1].Head, childHead)
+	}
+}
+
+func TestChildrenDisabled(t *testing.T) {
+	s := New(Config{LaneKey: "trace"}, 80, 24) // Children: false
+	s.Ingest(model.SpanEvent{Name: "SELECT users", ParentID: "p", TraceID: "t1", Kind: 3})
+	if len(s.Drops()) != 0 {
+		t.Errorf("children disabled: want 0 drops, got %d", len(s.Drops()))
+	}
+}
+
 func TestForecastReactsTo5xx(t *testing.T) {
 	s := newTestSim()
 	for i := 0; i < 20; i++ {

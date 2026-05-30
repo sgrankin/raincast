@@ -55,6 +55,7 @@ type Drop struct {
 	Alpha float64
 	Err   bool
 	Evap  bool // 404s evaporate partway down
+	Child bool // a trailing child droplet (downstream span), not a request
 
 	TraceID string
 	Kind    int32
@@ -65,6 +66,7 @@ type Config struct {
 	LaneKey          string // "trace" (default) or "client"
 	DictCap          int
 	MinFall, MaxFall float64 // cells/sec; slowest, fastest
+	Children         bool    // spawn child droplets for downstream (non-HTTP) spans
 }
 
 // Sim owns all mutable rain state.
@@ -120,8 +122,12 @@ func (s *Sim) DictSize() int { return len(s.dict) }
 func (s *Sim) Ingest(ev model.Event) {
 	switch e := ev.(type) {
 	case model.SpanEvent:
-		if e.Method != "" || e.Route != "" {
+		switch {
+		case e.Method != "" || e.Route != "":
 			s.spawnRequest(e)
+		case s.cfg.Children && e.ParentID != "" && e.TraceID != "":
+			// A downstream (non-HTTP) span with a parent: a trailing droplet.
+			s.spawnChild(e)
 		}
 	case model.LogEvent:
 		// log sparks: later milestone
@@ -181,6 +187,50 @@ func (s *Sim) spawnRequest(e model.SpanEvent) {
 		s.index[e.TraceID] = d
 	}
 	s.weather.add(d.Class)
+}
+
+// childHead leads a child droplet — a small dot, since downstream spans have no
+// HTTP method to glyph.
+const childHead = '·'
+
+// spawnChild adds a trailing droplet for a downstream span. It shares the
+// parent's lane (both hash the same trace_id), so a request and its children
+// fall in one column — the trace waterfall. Its body is the span name (e.g.
+// "SELECT orders", "→ cache"). Color is muted (the renderer dims it) unless the
+// span errored. Children don't count toward the weather (that's requests only).
+func (s *Sim) spawnChild(e model.SpanEvent) {
+	if s.cols <= 0 {
+		return
+	}
+	name := e.Name
+	if name == "" {
+		name = "·"
+	}
+	body := []rune(strings.ReplaceAll(name, " ", "·")) // no gaps in the vertical stack
+	if len(body) > 12 {
+		body = body[:12]
+	}
+	for len(body) < 3 { // a small minimum droplet
+		body = append(body, noiseRune())
+	}
+	class := 0
+	if e.Err {
+		class = 5
+	}
+	d := &Drop{
+		Lane:    s.lane(e.TraceID, e.IP),
+		Y:       -rand.Float64() * spawnStaggerRows,
+		Vy:      s.fall(e.MS),
+		Head:    childHead,
+		Body:    body,
+		Class:   class,
+		Alpha:   1,
+		Err:     e.Err,
+		Child:   true,
+		TraceID: e.TraceID,
+		Kind:    e.Kind,
+	}
+	s.drops = append(s.drops, d)
 }
 
 // fall maps latency to fall speed: low ms = brisk, high ms = a slow crawl. Units

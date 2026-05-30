@@ -237,7 +237,17 @@ func (r *Renderer) paint(c cells, s *sim.Sim) {
 		if d.Lane < 0 || d.Lane >= r.cols {
 			continue
 		}
-		col := r.pal.StatusColor(d.Class * 100)
+		// Children are muted (secondary to their request) unless they errored;
+		// requests take their status hue.
+		var col theme.RGB
+		switch {
+		case d.Child && d.Err:
+			col = r.pal.Status[5]
+		case d.Child:
+			col = r.pal.Dim
+		default:
+			col = r.pal.StatusColor(d.Class * 100)
+		}
 		headRow := int(d.Y)
 		for j := 0; j <= len(d.Body); j++ {
 			row := headRow - j
